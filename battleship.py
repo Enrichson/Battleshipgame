@@ -89,6 +89,11 @@ class Board:
                 if coord_str.lower() == 'quit':
                     send_packet(conn, sequence_number, 1, "Game Over: You have quit the game.")
                     return False
+                
+                if not coord_str or not coord_str.strip():
+                    send_packet(conn, sequence_number, 1, "[1] Invalid input. Please enter a coordinate.")
+                    sequence_number += 1
+                    continue
 
                 try:
                     row, col = parse_coordinate(coord_str)
@@ -101,7 +106,18 @@ class Board:
                         return False  # Client disconnected or error occurred
                     _, _, orientation_str = packet
 
-                    orientation = 0 if orientation_str.upper() == 'H' else 1
+                    orientation_str = orientation_str.strip().upper()
+                    if orientation_str not in ('H', 'V'):
+                        send_packet(conn, sequence_number, 1, "[!] Invalid orientation. Please enter 'H' for horizontal or 'V' for vertical.")
+                        sequence_number += 1
+                        continue 
+                    
+                    if not orientation_str or not orientation_str.strip():
+                        send_packet(conn, sequence_number, 1, "[!] Invalid input. Please enter 'H' or 'V'.")
+                        sequence_number += 1
+                        continue
+
+                    orientation = 0 if orientation_str == 'H' else 1
                     if self.can_place_ship(row, col, ship_size, orientation):
                         occupied_positions = self.do_place_ship(row, col, ship_size, orientation)
                         self.placed_ships.append({'name': ship_name, 'positions': occupied_positions})
@@ -274,10 +290,9 @@ def parse_coordinate(coord_str):
             )
 
         # Validate column digits
-        if not col_digits.isdigit():
-            raise ValueError(
-                "Invalid format. Must be a letter followed by a number (e.g., A1)."
-            )
+        if not int(col_digits.isdigit()) or len(col_digits) < 1 or len(col_digits) > 2:
+            raise ValueError("Invalid format. Must be a letter followed by a number (e.g., A1).")
+        
 
         row = ord(row_letter) - ord('A')
         col = int(col_digits) - 1  # zero-based
@@ -442,7 +457,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             break
                         continue  # If not game over, skip rest of this turn
 
-                    if not guess:
+                    if not guess or not guess.strip():
                         send_to_player(conn1, sequence_number1, "Invalid input. Please enter a coordinate.")
                         continue
                     elif guess.lower() == 'quit':
@@ -485,7 +500,9 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     except ValueError as e:
                         # handle Invalid coordinate parsing
                         send_to_player(conn1, sequence_number1, f"Invalid coordinate: {e}")
+                        sequence_number1 += 1
                         continue
+
 
                 except (BrokenPipeError, ConnectionResetError):
                     print(f"[INFO] Player {user_id1} disconnected. Saving game state...")
@@ -553,43 +570,50 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             break
                         continue  # If not game over, skip rest of this turn
 
-                    if not guess:
+                    if not guess or not guess.strip():
                         send_to_player(conn2, sequence_number2, "Invalid input. Please enter a coordinate.")
                         continue
                     elif guess.lower() == 'quit':
                         raise ConnectionResetError("Player 2 has quit the game.")
 
                     timeout_counts[2] = 0  # Reset timeout flag for Player 2
+                    
+                    try:
+                        row, col = parse_coordinate(guess)
+                        result, sunk_name = board1.fire_at(row, col)
+                        if result == 'hit':
+                            freshBoard1.display_grid[row][col] = 'X'
+                            if sunk_name:
+                                send_to_both(f"Player 2 HIT! Sunk {sunk_name}!")
+                                notify_spectators(f"Player 2 HIT! Sunk {sunk_name}!")
+                            else:
+                                send_to_both("Player 2 HIT!")
+                                notify_spectators("Player 2 HIT!")
+                        elif result == 'miss':
+                            freshBoard1.display_grid[row][col] = 'o'
+                            send_to_both("Player 2 MISS!")
+                            notify_spectators("Player 2 MISS!")
+                        elif result == 'already_shot':
+                            send_to_player(conn2, sequence_number2, "You've already fired at that location.")
+                            continue
 
-                    row, col = parse_coordinate(guess)
-                    result, sunk_name = board1.fire_at(row, col)
-                    if result == 'hit':
-                        freshBoard1.display_grid[row][col] = 'X'
-                        if sunk_name:
-                            send_to_both(f"Player 2 HIT! Sunk {sunk_name}!")
-                            notify_spectators(f"Player 2 HIT! Sunk {sunk_name}!")
-                        else:
-                            send_to_both("Player 2 HIT!")
-                            notify_spectators("Player 2 HIT!")
-                    elif result == 'miss':
-                        freshBoard1.display_grid[row][col] = 'o'
-                        send_to_both("Player 2 MISS!")
-                        notify_spectators("Player 2 MISS!")
-                    elif result == 'already_shot':
-                        send_to_player(conn2, sequence_number2, "You've already fired at that location.")
+                        # Send Player 2 their own firing board after each move
+                        send_to_player(conn2, sequence_number2, "YOUR FIRING BOARD:\n" + freshBoard1.get_display_grid())
+                        # Send spectators a copy of the board
+                        notify_spectators("PLAYER 2 FIRING BOARD:\n" + board1.get_display_grid())
+
+                        # Check if Player 1's ships are all sunk
+                        if board1.all_ships_sunk():
+                            send_to_both("Player 2 wins! All Player 1's ships are sunk.")
+                            notify_spectators("Player 2 wins! All Player 1's ships are sunk.")
+                            game_running = False
+                            break
+                        
+                    except ValueError as e:
+                        # handle Invalid coordinate parsing
+                        send_to_player(conn1, sequence_number1, f"Invalid coordinate: {e}")
+                        sequence_number1 += 1
                         continue
-
-                    # Send Player 2 their own firing board after each move
-                    send_to_player(conn2, sequence_number2, "YOUR FIRING BOARD:\n" + freshBoard1.get_display_grid())
-                    # Send spectators a copy of the board
-                    notify_spectators("PLAYER 2 FIRING BOARD:\n" + board1.get_display_grid())
-
-                    # Check if Player 1's ships are all sunk
-                    if board1.all_ships_sunk():
-                        send_to_both("Player 2 wins! All Player 1's ships are sunk.")
-                        notify_spectators("Player 2 wins! All Player 1's ships are sunk.")
-                        game_running = False
-                        break
 
                 except (BrokenPipeError, ConnectionResetError):
                     print(f"[INFO] Player {user_id2} disconnected. Saving game state...")
