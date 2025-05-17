@@ -63,16 +63,19 @@ def receive_packet(conn):
     try:
         # Read the header first (7 bytes for header + 4 bytes for checksum)
         header_and_checksum = conn.recv(11)
-        if not header_and_checksum:
+        if not header_and_checksum or len(header_and_checksum) < 11:
             return None
 
         # Extract payload length from the header
         _, _, payload_length = struct.unpack('!H B I', header_and_checksum[:7])
 
-        # Read the payload
-        payload = conn.recv(payload_length)
-        if not payload:
-            return None
+        # Read the payload (allow empty payload)
+        payload = b''
+        while len(payload) < payload_length:
+            chunk = conn.recv(payload_length - len(payload))
+            if not chunk:
+                break
+            payload += chunk
 
         # Combine header, checksum, and payload
         packet = header_and_checksum + payload
