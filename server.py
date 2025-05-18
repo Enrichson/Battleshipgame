@@ -251,7 +251,7 @@ def resume_game(conn, user_id, server_socket, notify_spectators, send_packet,
         # Retrieve the second player's connection
         user_id1 = game_state["user_id1"]
         user_id2 = game_state["user_id2"]
-
+        
         if user_id == user_id1:
             # Player 1 is reconnecting
             conn1 = conn
@@ -348,6 +348,10 @@ def simulate_packet_transmission_with_errors(error_rate):
     """
     corrupted_count = 0
 
+    if packet_count == 0:
+        print("[INFO] No packets were sent during gameplay. Skipping error simulation.")
+        return corrupted_count
+
     for i in range(packet_count):
         sequence_number = i
         packet_type = 1 
@@ -367,7 +371,8 @@ def simulate_packet_transmission_with_errors(error_rate):
     print(f"Total Packets Sent During Gameplay: {packet_count}")
     print(f"Corrupted Packets Detected: {corrupted_count}")
     print(f"Error Rate: {error_rate * 100:.2f}%")
-    print(f"Detection Rate: {(corrupted_count / packet_count) * 100:.2f}%")
+    if packet_count > 0:
+        print(f"Detection Rate: {(corrupted_count / packet_count) * 100:.2f}%")
     return corrupted_count
 
 def main():
@@ -515,8 +520,7 @@ def main():
         except KeyboardInterrupt:
             print("[INFO] Server shutting down due to KeyboardInterrupt.")
         finally:
-            notify_and_disconnect_lobby(
-            )  # Notify and disconnect all spectators
+            notify_and_disconnect_lobby()  # Notify and disconnect all spectators
             lobby_thread.join()  # Wait for the spectator thread to finish
             print("[INFO] Server is shutting down.")
 
