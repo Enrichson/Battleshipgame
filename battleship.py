@@ -419,6 +419,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
     try:
         while game_running:
             if current_turn == 1:
+                send_to_player(conn1, sequence_number1, "YOUR FIRING BOARD:\n" + freshBoard2.get_display_grid())
                 send_to_player(conn1, sequence_number1,"Enter coordinate to fire at (e.g. B5 or 'quit' to exit):")
                 send_to_player(conn2, sequence_number2, "Waiting for Player 1...")
                 notify_spectators("Player 1 is taking their turn.")
@@ -521,7 +522,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     if conn1:
                         send_packet(conn1, sequence_number1, 1, "You have reconnected. Continuing the game...")
                         send_to_both(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
-                        send_to_player(conn1, sequence_number1, "YOUR FIRING BOARD:\n" + freshBoard2.get_display_grid())
                         notify_spectators(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
                         continue
                     else:
@@ -531,6 +531,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                         break
 
             else:
+                send_to_player(conn2, sequence_number2, "YOUR FIRING BOARD:\n" + freshBoard1.get_display_grid())
                 send_to_player(conn2, sequence_number2,"Enter coordinate to fire at (e.g. B5 or 'quit' to exit):")
                 send_to_player(conn1, sequence_number1, "Waiting for Player 2...")
                 notify_spectators("Player 2 is taking their turn.")
@@ -634,7 +635,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     if conn2:
                         send_packet(conn2, sequence_number2, 1, "You have reconnected. Continuing the game...")
                         send_to_both(f"Player 2 ({user_id1}) has reconnected. Continuing the game...")
-                        send_to_player(conn2, sequence_number2, "YOUR EXISTING FIRING BOARD:\n" + freshBoard1.get_display_grid())
                         notify_spectators(f"Player 2 ({user_id1}) has reconnected. Continuing the game...")
                         continue
                     else:
