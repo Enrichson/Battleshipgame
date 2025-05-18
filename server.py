@@ -18,6 +18,13 @@ disconnected_players = {}
 active_players = {}  
 spectators_lock = threading.Lock()
 
+PACKET_TYPE_GAME = 1
+PACKET_TYPE_CHAT = 2
+PACKET_TYPE_SYSTEM = 3
+PACKET_TYPE_SPECTATOR = 4
+PACKET_TYPE_BOARD = 5
+PACKET_TYPE_PROMPT = 6
+
 
 def create_packet(sequence_number, packet_type, payload):
     """
@@ -62,9 +69,16 @@ def send_packet(conn, sequence_number, packet_type, payload):
 def receive_packet(conn):
     try:
         # Read the header first (7 bytes for header + 4 bytes for checksum)
-        header_and_checksum = conn.recv(11)
-        if not header_and_checksum or len(header_and_checksum) < 11:
-            return None
+        header_and_checksum = b''
+        while len(header_and_checksum) < 11:
+            try:
+                chunk = conn.recv(11 - len(header_and_checksum))
+                if not chunk:
+                    return None
+                header_and_checksum += chunk
+            except socket.timeout:
+                print("[INFO] Timeout occurred while waiting for data (header).")
+                return None
 
         # Extract payload length from the header
         _, _, payload_length = struct.unpack('!H B I', header_and_checksum[:7])
@@ -72,16 +86,20 @@ def receive_packet(conn):
         # Read the payload (allow empty payload)
         payload = b''
         while len(payload) < payload_length:
-            chunk = conn.recv(payload_length - len(payload))
-            if not chunk:
-                break
-            payload += chunk
+            try:
+                chunk = conn.recv(payload_length - len(payload))
+                if not chunk:
+                    break
+                payload += chunk
+            except socket.timeout:
+                print("[INFO] Timeout occurred while waiting for data (payload).")
+                return None
 
         # Combine header, checksum, and payload
         packet = header_and_checksum + payload
         return parse_packet(packet)
     except socket.timeout:
-        print("[INFO] Timeout occurred while waiting for data.")
+        print("[INFO] Timeout occurred while waiting for data (outer).")
         return None
     except Exception as e:
         print(f"[ERROR] Failed to receive packet: {e}")
@@ -129,75 +147,77 @@ def handle_lobby_connections(server_socket):
     global unique_id_counter, disconnected_players, spectators
 
     while True:
-        conn, addr = server_socket.accept()
-        print(f"[INFO] New client connected from {addr}.")
-        send_packet(
-            conn, 0, 1,
-            "Welcome! Are you a new player, reconnecting, or a spectator? (Type 'new', your user ID, or 'spectator'):"
-        )
-
         try:
-            packet = receive_packet(conn)
-            if not packet:
-                print("[ERROR] Failed to receive user input.")
+            conn, addr = server_socket.accept()
+            print(f"[INFO] New client connected from {addr}.")
+            send_packet(
+                conn, 0, 1,
+                "Welcome! Are you a new player, reconnecting, or a spectator? (Type 'new', your user ID, or 'spectator'):"
+            )
+
+            try:
+                packet = receive_packet(conn)
+                if not packet:
+                    print("[ERROR] Failed to receive user input.")
+                    conn.close()
+                    continue
+
+                _, _, user_input = packet
+
+                if user_input.lower() == "new" or user_input.lower() == "n":
+                    # Assign a new user ID
+                    user_id = unique_id_counter
+                    unique_id_counter += 1
+                    player_queue.put((conn, addr, user_id))
+                    send_packet(
+                        conn, user_id, 3,
+                        f"Welcome, Player {user_id}! You are in the queue. Waiting for another player..."
+                    )
+                    print(
+                        f"[INFO] New player assigned ID {user_id} and added to the queue."
+                    )
+
+                elif user_input.isdigit() and int(
+                        user_input) in disconnected_players:
+                    # Handle reconnection
+                    user_id = int(user_input)
+                    game_state, _ = disconnected_players.pop(user_id)
+                    send_packet(
+                        conn, user_id, 3,
+                        f"Welcome back, Player {user_id}! Reconnecting you to your game..."
+                    )
+                    print(f"[INFO] Player {user_id} reconnected.")
+                    # Resume the game
+                    threading.Thread(target=resume_game,
+                                    args=(conn, user_id, server_socket,
+                                        notify_spectators, send_packet,
+                                        receive_packet, disconnected_players),
+                                    daemon=True).start()
+
+                elif user_input.lower() == "spectator" or user_input.lower(
+                ) == "s":
+                    # Add the client to the spectators list
+                    with spectators_lock:
+                        spectators.append((conn, addr))
+                    send_packet(
+                        conn, 0, 3,
+                        "You are now spectating. You will receive updates about ongoing games."
+                    )
+                    print(f"[INFO] Client {addr} is now spectating.")
+                    notify_spectators("A new spectator has joined.")
+
+                else:
+                    send_packet(
+                        conn, 0, 3,
+                        "Invalid input. Please type 'new', your user ID, or 'spectator'."
+                    )
+                    conn.close()
+
+            except Exception as e:
+                print(f"[ERROR] Error handling connection from {addr}: {e}")
                 conn.close()
-                continue
-
-            _, _, user_input = packet
-
-            if user_input.lower() == "new" or user_input.lower() == "n":
-                # Assign a new user ID
-                user_id = unique_id_counter
-                unique_id_counter += 1
-                player_queue.put((conn, addr, user_id))
-                send_packet(
-                    conn, user_id, 3,
-                    f"Welcome, Player {user_id}! You are in the queue. Waiting for another player..."
-                )
-                print(
-                    f"[INFO] New player assigned ID {user_id} and added to the queue."
-                )
-
-            elif user_input.isdigit() and int(
-                    user_input) in disconnected_players:
-                # Handle reconnection
-                user_id = int(user_input)
-                game_state, _ = disconnected_players.pop(user_id)
-                send_packet(
-                    conn, user_id, 3,
-                    f"Welcome back, Player {user_id}! Reconnecting you to your game..."
-                )
-                print(f"[INFO] Player {user_id} reconnected.")
-                # Resume the game
-                threading.Thread(target=resume_game,
-                                 args=(conn, user_id, server_socket,
-                                       notify_spectators, send_packet,
-                                       receive_packet, disconnected_players),
-                                 daemon=True).start()
-
-            elif user_input.lower() == "spectator" or user_input.lower(
-            ) == "s":
-                # Add the client to the spectators list
-                with spectators_lock:
-                    spectators.append((conn, addr))
-                send_packet(
-                    conn, 0, 3,
-                    "You are now spectating. You will receive updates about ongoing games."
-                )
-                print(f"[INFO] Client {addr} is now spectating.")
-                notify_spectators("A new spectator has joined.")
-
-            else:
-                send_packet(
-                    conn, 0, 3,
-                    "Invalid input. Please type 'new', your user ID, or 'spectator'."
-                )
-                conn.close()
-
-        except Exception as e:
-            print(f"[ERROR] Error handling connection from {addr}: {e}")
-            conn.close()
-
+        except socket.timeout:
+            continue
 
 def notify_spectators(message, board1=None, board2=None):
     """
@@ -252,6 +272,8 @@ def wait_for_reconnection(server_socket, player_id, timeout=10):
         return None
     finally:
         server_socket.settimeout(original_timeout)
+        
+    
 
 def resume_game(conn, user_id, server_socket, notify_spectators, send_packet,
                 receive_packet, disconnected_players):
@@ -441,8 +463,23 @@ def main():
                             send_packet(conn1, user_id1, 6, "Do you want to play again? (y/n):")
                             send_packet(conn2, user_id2, 6, "Do you want to play again? (y/n):")
 
-                            response1 = receive_packet(conn1)
-                            response2 = receive_packet(conn2)
+                            try:
+                                conn1.settimeout(10)
+                                response1 = receive_packet(conn1)
+                            except socket.timeout:
+                                print("[INFO] Player 1 did not respond to replay prompt in time.")
+                                response1 = None
+
+                            try:
+                                conn2.settimeout(10)
+                                response2 = receive_packet(conn2)
+                            except socket.timeout:
+                                print("[INFO] Player 2 did not respond to replay prompt in time.")
+                                response2 = None
+
+                            # Reset socket timeout to default (optional, if you use timeouts elsewhere)
+                            conn1.settimeout(None)
+                            conn2.settimeout(None)
 
                             valid_yes = ["y", "yes"]
                             valid_no = ["n", "no"]
@@ -453,55 +490,29 @@ def main():
                                     return None
                                 return resp[2].strip().lower()
 
-                            resp1 = sanitize(response1, conn1, user_id1)
-                            resp2 = sanitize(response2, conn2, user_id2)
+                            resp1 = sanitize(response1, conn1, user_id1) if response1 is not None else None
+                            resp2 = sanitize(response2, conn2, user_id2) if response2 is not None else None
 
-                            if resp1 is None or resp2 is None:
-                                continue  # Reprompt both users
+                            # If a player did not respond (timeout), close their connection and treat as "no"
+                            if response1 is None:
+                                print(f"[INFO] Player 1 did not respond to replay prompt. Closing connection.")
+                                try:
+                                    conn1.close()
+                                except Exception as e:
+                                    print(f"[ERROR] Error while closing Player 1 connection: {e}")
+                                resp1 = "no"
 
-                            if resp1 in valid_yes and resp2 in valid_yes:
-                                print("[INFO] Both players want to play again. Restarting game...")
-                                run_multi_player_game_online(
-                                    conn1, conn2, notify_spectators, user_id1, user_id2, s,
-                                    wait_for_reconnection, send_packet, receive_packet,
-                                    disconnected_players, active_players)
-                                continue  # Ask again after this game ends
+                            if response2 is None:
+                                print(f"[INFO] Player 2 did not respond to replay prompt. Closing connection.")
+                                try:
+                                    conn2.close()
+                                except Exception as e:
+                                    print(f"[ERROR] Error while closing Player 2 connection: {e}")
+                                resp2 = "no"
 
-                            # If here, at least one player said no: close both connections
-                            try:
-                                conn1.close()
-                                print(f"[INFO] Player 1 (ID {user_id1}) connection closed.")
-                            except Exception as e:
-                                print(f"[ERROR] Error while closing Player 1 connection: {e}")
-
-                            try:
-                                conn2.close()
-                                print(f"[INFO] Player 2 (ID {user_id2}) connection closed.")
-                            except Exception as e:
-                                print(f"[ERROR] Error while closing Player 2 connection: {e}")
-
-                            # Try to promote spectators if available
-                            willing_spectators = ask_spectators_to_play()
-                            if len(willing_spectators) >= 2:
-                                print("[INFO] Promoting willing spectators to players for the next game.")
-                                conn1, addr1 = willing_spectators[0]
-                                conn2, addr2 = willing_spectators[1]
-                                user_id1 = unique_id_counter
-                                unique_id_counter += 1
-                                user_id2 = unique_id_counter
-                                unique_id_counter += 1
-                                with spectators_lock:
-                                    spectators.remove((conn1, addr1))
-                                    spectators.remove((conn2, addr2))
-                                run_multi_player_game_online(
-                                    conn1, conn2, notify_spectators, user_id1,
-                                    user_id2, s, wait_for_reconnection,
-                                    send_packet, receive_packet,
-                                    disconnected_players, active_players)
-                                continue
-                            else:
-                                print("[INFO] Not enough willing spectators to start the next game. Waiting for new players.")
-                                break
+                            # Now, if either said no (or timed out), break out of the rematch loop
+                            if resp1 not in valid_yes or resp2 not in valid_yes:
+                                break  # End rematch loop, do not reprompt
 
                         except (BrokenPipeError, ConnectionResetError):
                             print("[ERROR] One of the players disconnected during the rematch prompt.")
@@ -529,6 +540,26 @@ def main():
 
                     error_rate = 0.5
                     simulate_packet_transmission_with_errors(error_rate)
+
+                    # After the replay prompt loop ends, ask spectators if they want to play
+                    willing_spectators = ask_spectators_to_play()
+                    if len(willing_spectators) >= 2:
+                        print("[INFO] Promoting willing spectators to players for the next game.")
+                        # Remove from spectators and add to player queue
+                        with spectators_lock:
+                            for conn, addr in willing_spectators[:2]:
+                                spectators.remove((conn, addr))
+                        user_id_a = unique_id_counter
+                        unique_id_counter += 1
+                        user_id_b = unique_id_counter
+                        unique_id_counter += 1
+                        player_queue.put((willing_spectators[0][0], willing_spectators[0][1], user_id_a))
+                        player_queue.put((willing_spectators[1][0], willing_spectators[1][1], user_id_b))
+                    else:
+                        print("[INFO] Not enough willing spectators to start the next game. Waiting for new players.")
+
+                    # Now notify remaining spectators that the game is over
+                    notify_spectators("The game has ended. Thank you for watching!")
 
         except KeyboardInterrupt:
             print("[INFO] Server shutting down due to KeyboardInterrupt.")

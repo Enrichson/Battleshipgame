@@ -352,9 +352,14 @@ def load_game_state(filename):
 def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, wait_for_reconnection, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None):
     sequence_number1 = 0
     sequence_number2 = 0
+    waiting_for_reconnection = {1: False, 2: False}
 
     def send_to_player(conn, sequence_number, msg):
-        send_packet(conn, sequence_number, 1, msg)
+        if conn is not None:
+            try:
+                send_packet(conn, sequence_number, 1, msg)
+            except Exception as e:
+                print(f"[ERROR] Failed to send to player: {e}")
 
     def send_to_both(msg):
         send_to_player(conn1, sequence_number1, msg)
@@ -518,6 +523,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     disconnected_players[user_id1] = (game_state, conn1)
                     conn1.close()
                     save_game_state("game_state.pkl", game_state)
+
                     try:
                         conn1 = wait_for_reconnection(server_socket, user_id1)
                         if conn1:
@@ -644,6 +650,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     disconnected_players[user_id2] = (game_state, conn2)
                     conn2.close()
                     save_game_state("game_state.pkl", game_state)
+
                     try:
                         conn2 = wait_for_reconnection(server_socket, user_id2)
                         if conn2:
@@ -672,6 +679,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
             current_turn = 3 - current_turn  # Switch turns
     finally:
         send_to_both("The game has ended. Thank you for playing!")
-        notify_spectators("The game has ended. Thank you for watching!")
+        # notify_spectators("The game has ended. Thank you for watching!")
         active_players.pop(user_id1, None)
         active_players.pop(user_id2, None)
