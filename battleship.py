@@ -465,8 +465,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
 
                     timeout_counts[1] = 0  # Reset timeout flag for Player 1
 
-
-
                     try:
                         row, col = parse_coordinate(guess)
                         result, sunk_name = board2.fire_at(row, col)
@@ -503,9 +501,9 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                         sequence_number1 += 1
                         continue
 
-
                 except (BrokenPipeError, ConnectionResetError):
                     print(f"[INFO] Player {user_id1} disconnected. Saving game state...")
+                    send_to_player(conn2, sequence_number2, f"Player 1 disconnected, waiting for reconnection...")
                     game_state = {
                         "board1": board1,
                         "board2": board2,
@@ -523,6 +521,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     if conn1:
                         send_packet(conn1, sequence_number1, 1, "You have reconnected. Continuing the game...")
                         send_to_both(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
+                        send_to_player(conn1, sequence_number1, "YOUR FIRING BOARD:\n" + freshBoard2.get_display_grid())
                         notify_spectators(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
                         continue
                     else:
@@ -617,6 +616,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
 
                 except (BrokenPipeError, ConnectionResetError):
                     print(f"[INFO] Player {user_id2} disconnected. Saving game state...")
+                    send_to_player(conn1, sequence_number1, f"Player 2 disconnected, waiting for reconnection...")
                     game_state = {
                         "board1": board1,
                         "board2": board2,
@@ -632,8 +632,10 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     save_game_state("game_state.pkl", game_state)
                     conn2 = wait_for_reconnection(server_socket, user_id2)
                     if conn2:
-                        print(f"[INFO] Player {user_id2} reconnected. Resuming game...")
-                        notify_spectators(f"Player 2 ({user_id2}) has reconnected. Continuing the game...")
+                        send_packet(conn2, sequence_number2, 1, "You have reconnected. Continuing the game...")
+                        send_to_both(f"Player 2 ({user_id1}) has reconnected. Continuing the game...")
+                        send_to_player(conn2, sequence_number2, "YOUR EXISTING FIRING BOARD:\n" + freshBoard1.get_display_grid())
+                        notify_spectators(f"Player 2 ({user_id1}) has reconnected. Continuing the game...")
                         continue
                     else:
                         send_to_both("Game Over: Player 2 did not reconnect.")
