@@ -8,7 +8,7 @@ from queue import Queue
 from battleship import run_multi_player_game_online
 
 HOST = '127.0.0.1'
-PORT = 5003
+PORT = 5002
 game_running = False
 spectators = []
 player_queue = Queue()
@@ -218,11 +218,10 @@ def notify_spectators(message, board1=None, board2=None):
                     (conn, addr))  # Remove disconnected spectators
 
 
-def wait_for_reconnection(server_socket, player_id, timeout=30):
+def wait_for_reconnection(server_socket, player_id, timeout=10):
     """
     Wait for a disconnected player to reconnect within the given timeout.
     Returns the new connection if the player reconnects, or None if the timeout expires.
-    Resets the server socket timeout after use.
     """
     print(f"[INFO] Waiting for Player {player_id} to reconnect...")
     original_timeout = server_socket.gettimeout()
@@ -245,7 +244,7 @@ def wait_for_reconnection(server_socket, player_id, timeout=30):
             print(f"[ERROR] Invalid user ID {user_input} for reconnection attempt from {addr}")
             conn.close()
             return None
-    except socket.timeout:
+    except server_socket.timeout:
         print(f"[INFO] Player {player_id} did not reconnect within the timeout.")
         return None
     except Exception as e:
