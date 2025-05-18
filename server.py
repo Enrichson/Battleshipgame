@@ -222,18 +222,23 @@ def wait_for_reconnection(server_socket, player_id, timeout=30):
     """
     Wait for a disconnected player to reconnect within the given timeout.
     Returns the new connection if the player reconnects, or None if the timeout expires.
+    Resets the server socket timeout after use.
     """
     print(f"[INFO] Waiting for Player {player_id} to reconnect...")
+    original_timeout = server_socket.gettimeout()
     server_socket.settimeout(timeout)
     try:
         conn, addr = server_socket.accept()
         print(f"[INFO] Player {player_id} reconnected from {addr}")
         return conn
     except socket.timeout:
-        print(
-            f"[INFO] Player {player_id} did not reconnect within the timeout.")
+        print(f"[INFO] Player {player_id} did not reconnect within the timeout.")
         return None
-
+    except Exception as e:
+        print(f"[ERROR] An unexpected error occurred while waiting for Player {player_id}: {e}")
+        return None
+    finally:
+        server_socket.settimeout(original_timeout)
 
 def resume_game(conn, user_id, server_socket, notify_spectators, send_packet,
                 receive_packet, disconnected_players):
