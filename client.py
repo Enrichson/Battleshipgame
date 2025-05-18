@@ -30,7 +30,8 @@ def receive_messages(sock):
                     "Enter coordinate to fire at",
                     "Do you want to play again?",
                     "Welcome! Are you a new player, reconnecting, or a spectator? (Type 'new', your user ID, or 'spectator'):",
-                    "Do you want to play the next game? (y/n):"
+                    "Do you want to play the next game? (y/n):",
+                    "Please enter your user ID to reconnect:"
             ]):
                 Waiting_for_input = True
 

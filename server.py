@@ -229,8 +229,22 @@ def wait_for_reconnection(server_socket, player_id, timeout=30):
     server_socket.settimeout(timeout)
     try:
         conn, addr = server_socket.accept()
-        print(f"[INFO] Player {player_id} reconnected from {addr}")
-        return conn
+        print(f"[INFO] Connection from {addr} for reconnection. Prompting for user ID...")
+        send_packet(conn, 0, 3, "Please enter your user ID to reconnect:")
+        packet = receive_packet(conn)
+        if not packet:
+            print("[ERROR] No user ID received for reconnection.")
+            conn.close()
+            return None
+        _, _, user_input = packet
+        if user_input.isdigit() and int(user_input) == player_id:
+            print(f"[INFO] Player {player_id} successfully reconnected from {addr}")
+            return conn
+        else:
+            send_packet(conn, 0, 3, "Invalid user ID for reconnection. Disconnecting.")
+            print(f"[ERROR] Invalid user ID {user_input} for reconnection attempt from {addr}")
+            conn.close()
+            return None
     except socket.timeout:
         print(f"[INFO] Player {player_id} did not reconnect within the timeout.")
         return None
