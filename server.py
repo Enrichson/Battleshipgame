@@ -421,7 +421,6 @@ def main():
                             response1 = receive_packet(conn1)
                             response2 = receive_packet(conn2)
 
-                            # Input sanitization
                             valid_yes = ["y", "yes"]
                             valid_no = ["n", "no"]
 
@@ -444,29 +443,42 @@ def main():
                                     wait_for_reconnection, send_packet, receive_packet,
                                     disconnected_players, active_players)
                                 continue  # Ask again after this game ends
+
+                            # If here, at least one player said no: close both connections
+                            try:
+                                conn1.close()
+                                print(f"[INFO] Player 1 (ID {user_id1}) connection closed.")
+                            except Exception as e:
+                                print(f"[ERROR] Error while closing Player 1 connection: {e}")
+
+                            try:
+                                conn2.close()
+                                print(f"[INFO] Player 2 (ID {user_id2}) connection closed.")
+                            except Exception as e:
+                                print(f"[ERROR] Error while closing Player 2 connection: {e}")
+
+                            # Try to promote spectators if available
+                            willing_spectators = ask_spectators_to_play()
+                            if len(willing_spectators) >= 2:
+                                print("[INFO] Promoting willing spectators to players for the next game.")
+                                conn1, addr1 = willing_spectators[0]
+                                conn2, addr2 = willing_spectators[1]
+                                user_id1 = unique_id_counter
+                                unique_id_counter += 1
+                                user_id2 = unique_id_counter
+                                unique_id_counter += 1
+                                with spectators_lock:
+                                    spectators.remove((conn1, addr1))
+                                    spectators.remove((conn2, addr2))
+                                run_multi_player_game_online(
+                                    conn1, conn2, notify_spectators, user_id1,
+                                    user_id2, s, wait_for_reconnection,
+                                    send_packet, receive_packet,
+                                    disconnected_players, active_players)
+                                continue
                             else:
-                                # Try to promote spectators if available
-                                willing_spectators = ask_spectators_to_play()
-                                if len(willing_spectators) >= 2:
-                                    print("[INFO] Promoting willing spectators to players for the next game.")
-                                    conn1, addr1 = willing_spectators[0]
-                                    conn2, addr2 = willing_spectators[1]
-                                    user_id1 = unique_id_counter
-                                    unique_id_counter += 1
-                                    user_id2 = unique_id_counter
-                                    unique_id_counter += 1
-                                    with spectators_lock:
-                                        spectators.remove((conn1, addr1))
-                                        spectators.remove((conn2, addr2))
-                                    run_multi_player_game_online(
-                                        conn1, conn2, notify_spectators, user_id1,
-                                        user_id2, s, wait_for_reconnection,
-                                        send_packet, receive_packet,
-                                        disconnected_players, active_players)
-                                    continue
-                                else:
-                                    print("[INFO] Not enough willing spectators to start the next game. Waiting for new players.")
-                                    break
+                                print("[INFO] Not enough willing spectators to start the next game. Waiting for new players.")
+                                break
 
                         except (BrokenPipeError, ConnectionResetError):
                             print("[ERROR] One of the players disconnected during the rematch prompt.")
