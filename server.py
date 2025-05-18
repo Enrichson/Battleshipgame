@@ -415,63 +415,74 @@ def main():
                     # Ask players if they want to play again
                     while True:
                         try:
-                            send_packet(conn1, user_id1, 6,
-                                        "Do you want to play again? (y/n):")
-                            send_packet(conn2, user_id2, 6,
-                                        "Do you want to play again? (y/n):")
+                            send_packet(conn1, user_id1, 6, "Do you want to play again? (y/n):")
+                            send_packet(conn2, user_id2, 6, "Do you want to play again? (y/n):")
 
                             response1 = receive_packet(conn1)
                             response2 = receive_packet(conn2)
-                            print(f"[DEBUG] Player 1 response: {response1[2]}")
-                            print(f"[DEBUG] Player 2 response: {response2[2]}")
 
-                            # Promote spectators to players if available
-                            print(
-                                f"[DEBUG] Spectators before promotion: {len(spectators)}"
-                            )
+                            valid_yes = ["y", "yes"]
+                            valid_no = ["n", "no"]
+
+                            def sanitize(resp, conn, user_id):
+                                if not resp or resp[2].strip().lower() not in valid_yes + valid_no:
+                                    send_packet(conn, user_id, 6, "Invalid input. Please enter 'y', 'yes', 'n', or 'no'.")
+                                    return None
+                                return resp[2].strip().lower()
+
+                            resp1 = sanitize(response1, conn1, user_id1)
+                            resp2 = sanitize(response2, conn2, user_id2)
+
+                            if resp1 is None or resp2 is None:
+                                continue  # Reprompt both users
+
+                            if resp1 in valid_yes and resp2 in valid_yes:
+                                print("[INFO] Both players want to play again. Restarting game...")
+                                run_multi_player_game_online(
+                                    conn1, conn2, notify_spectators, user_id1, user_id2, s,
+                                    wait_for_reconnection, send_packet, receive_packet,
+                                    disconnected_players, active_players)
+                                continue  # Ask again after this game ends
+
+                            # If here, at least one player said no: close both connections
+                            try:
+                                conn1.close()
+                                print(f"[INFO] Player 1 (ID {user_id1}) connection closed.")
+                            except Exception as e:
+                                print(f"[ERROR] Error while closing Player 1 connection: {e}")
+
+                            try:
+                                conn2.close()
+                                print(f"[INFO] Player 2 (ID {user_id2}) connection closed.")
+                            except Exception as e:
+                                print(f"[ERROR] Error while closing Player 2 connection: {e}")
+
+                            # Try to promote spectators if available
                             willing_spectators = ask_spectators_to_play()
-                            print(
-                                f"[DEBUG] Willing spectators: {len(willing_spectators)}"
-                            )
-                            print(
-                                f"[DEBUG] Spectators after promotion: {len(spectators)}"
-                            )
-
                             if len(willing_spectators) >= 2:
-                                print(
-                                    "[INFO] Promoting willing spectators to players for the next game."
-                                )
+                                print("[INFO] Promoting willing spectators to players for the next game.")
                                 conn1, addr1 = willing_spectators[0]
                                 conn2, addr2 = willing_spectators[1]
                                 user_id1 = unique_id_counter
                                 unique_id_counter += 1
                                 user_id2 = unique_id_counter
                                 unique_id_counter += 1
-
-                                # Remove promoted spectators from the spectators list
                                 with spectators_lock:
                                     spectators.remove((conn1, addr1))
                                     spectators.remove((conn2, addr2))
-
-                                # Start the next game with the promoted spectators
                                 run_multi_player_game_online(
                                     conn1, conn2, notify_spectators, user_id1,
                                     user_id2, s, wait_for_reconnection,
                                     send_packet, receive_packet,
                                     disconnected_players, active_players)
+                                continue
                             else:
-                                print(
-                                    "[INFO] Not enough willing spectators to start the next game. Waiting for new players."
-                                )
+                                print("[INFO] Not enough willing spectators to start the next game. Waiting for new players.")
                                 break
 
                         except (BrokenPipeError, ConnectionResetError):
-                            print(
-                                "[ERROR] One of the players disconnected during the rematch prompt."
-                            )
-                            notify_spectators(
-                                "The game has ended due to a player disconnecting.\n"
-                            )
+                            print("[ERROR] One of the players disconnected during the rematch prompt.")
+                            notify_spectators("The game has ended due to a player disconnecting.\n")
                             break
 
                 except Exception as e:
@@ -483,23 +494,15 @@ def main():
                     # Close connections for both players
                     try:
                         conn1.close()
-                        print(
-                            f"[INFO] Player 1 (ID {user_id1}) connection closed."
-                        )
+                        print(f"[INFO] Player 1 (ID {user_id1}) connection closed.")
                     except Exception as e:
-                        print(
-                            f"[ERROR] Error while closing Player 1 connection: {e}"
-                        )
+                        print(f"[ERROR] Error while closing Player 1 connection: {e}")
 
                     try:
                         conn2.close()
-                        print(
-                            f"[INFO] Player 2 (ID {user_id2}) connection closed."
-                        )
+                        print(f"[INFO] Player 2 (ID {user_id2}) connection closed.")
                     except Exception as e:
-                        print(
-                            f"[ERROR] Error while closing Player 2 connection: {e}"
-                        )
+                        print(f"[ERROR] Error while closing Player 2 connection: {e}")
 
                     error_rate = 0.5
                     simulate_packet_transmission_with_errors(error_rate)
