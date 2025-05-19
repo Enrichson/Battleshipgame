@@ -349,7 +349,7 @@ def load_game_state(filename):
         return None
 
 
-def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, handle_lobby_connections, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None):
+def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, handle_lobby_connections, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None, token1=None, token2=None):
     sequence_number1 = 0
     sequence_number2 = 0
 
@@ -416,8 +416,10 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
         send_to_player(conn2, sequence_number2, "All ships placed! The game is starting.")
         notify_spectators("Game is starting! Player 1 and Player 2 are ready to play.\n")
 
-    active_players[user_id1] = conn1
-    active_players[user_id2] = conn2
+    if token1 is not None:
+        active_players[user_id1] = {"conn": conn1, "token": token1}
+    if token2 is not None:
+        active_players[user_id2] = {"conn": conn2, "token": token2}
 
     game_running = True
     TIMEOUT_DURATION = 10  # Timeout duration in seconds
@@ -425,6 +427,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
     try:
         while game_running:
             if current_turn == 1:
+                send_to_player(conn1, sequence_number1, f"Your session token: {token1}")
                 send_to_player(conn1, sequence_number1, "YOUR FIRING BOARD:\n" + freshBoard2.get_display_grid())
                 send_to_player(conn1, sequence_number1,"Enter coordinate to fire at (e.g. B5 or 'quit' to exit):")
                 send_to_player(conn2, sequence_number2, "Waiting for Player 1...")
@@ -530,7 +533,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                         conn1 = handle_lobby_connections(server_socket)
                         if conn1:
                             # Update the active players dictionary and reset timeout
-                            active_players[user_id1] = conn1
+                            active_players[user_id1] = {"conn": conn1, "token": token1}
                             timeout_counts[1] = 0  # Reset timeout counter for Player 1
                             send_packet(conn1, sequence_number1, 1, "You have reconnected. Continuing the game...")
                             send_to_both(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
@@ -552,6 +555,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     continue
 
             else:
+                send_to_player(conn2, sequence_number2, f"Your session token: {token2}")
                 send_to_player(conn2, sequence_number2, "YOUR FIRING BOARD:\n" + freshBoard1.get_display_grid())
                 send_to_player(conn2, sequence_number2,"Enter coordinate to fire at (e.g. B5 or 'quit' to exit):")
                 send_to_player(conn1, sequence_number1, "Waiting for Player 2...")
@@ -657,7 +661,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                         conn2 = handle_lobby_connections(server_socket)
                         if conn2:
                             # Update the active players dictionary and reset timeout
-                            active_players[user_id2] = conn2
+                            active_players[user_id2] = {"conn": conn2, "token": token2}
                             timeout_counts[2] = 0  # Reset timeout counter for Player 1
                             send_packet(conn2, sequence_number2, 1, "You have reconnected. Continuing the game...")
                             send_to_both(f"Player 2 ({user_id2}) has reconnected. Continuing the game...")

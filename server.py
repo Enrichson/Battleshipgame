@@ -4,6 +4,7 @@ import pickle
 import struct
 import zlib
 import random
+import secrets
 from queue import Queue
 from battleship import run_multi_player_game_online
 
@@ -173,8 +174,26 @@ def handle_lobby_connections(server_socket):
             user_id = int(user_input)
             print(f"[INFO] Player {user_id} attempting to reconnect...")
 
+            # Prompt for session token
+            send_packet(conn, 0, 3, "Please enter your session token to reconnect:")
+            token_packet = receive_packet(conn)
+            if not token_packet:
+                print("[ERROR] Failed to receive session token.")
+                conn.close()
+                continue
+            _, _, session_token = token_packet
+
+            # Validate session token
+            expected_token = active_players.get(user_id, {}).get("token")
+            if session_token != expected_token:
+                send_packet(conn, 0, 3, "Invalid session token. Reconnection denied.")
+                conn.close()
+                print(f"[WARN] Player {user_id} provided invalid session token.")
+                continue
+
+            print(f"[INFO] Player {user_id} provided valid session token and is reconnecting...")
             # Mark as active and resume the game in a new thread
-            active_players[user_id] = conn
+            active_players[user_id]["conn"] = conn
             threading.Thread(
                 target=resume_game,
                 args=(conn, user_id, server_socket, notify_spectators, send_packet, receive_packet, disconnected_players),
@@ -223,44 +242,6 @@ def notify_spectators(message, board1=None, board2=None):
                 print(f"[ERROR] Failed to notify spectator {addr}: {e}")
                 spectators.remove(
                     (conn, addr))  # Remove disconnected spectators
-
-
-'''
-def wait_for_reconnection(server_socket, player_id, timeout=10):
-    """
-    Wait for a disconnected player to reconnect within the given timeout.
-    Returns the new connection if the player reconnects, or None if the timeout expires.
-    """
-    print(f"[INFO] Waiting for Player {player_id} to reconnect...")
-    original_timeout = server_socket.gettimeout()
-    server_socket.settimeout(timeout)
-    try:
-        conn, addr = server_socket.accept()
-        print(f"[INFO] Connection from {addr} for reconnection. Prompting for user ID...")
-        send_packet(conn, 0, 3, "Please enter your user ID to reconnect:")
-        packet = receive_packet(conn)
-        if not packet:
-            print("[ERROR] No user ID received for reconnection.")
-            conn.close()
-            return None
-        _, _, user_input = packet
-        if user_input.isdigit() and int(user_input) == player_id:
-            print(f"[INFO] Player {player_id} successfully reconnected from {addr}")
-            active_players[player_id] = conn  # Update active_players
-            return conn
-        else:
-            send_packet(conn, 0, 3, "Invalid user ID for reconnection. Disconnecting.")
-            conn.close()
-            return None
-    except socket.timeout:
-        print(f"[INFO] Player {player_id} did not reconnect within the timeout.")
-        return None
-    except Exception as e:
-        print(f"[ERROR] An unexpected error occurred while waiting for Player {player_id}: {e}")
-        return None
-    finally:
-        server_socket.settimeout(original_timeout)
-'''
     
     
 
@@ -275,11 +256,11 @@ def resume_game(conn, user_id, server_socket, notify_spectators, send_packet,
         user_id2 = game_state["user_id2"]
 
         if user_id == user_id1:
-            conn1 = conn
-            conn2 = active_players.get(user_id2) or disconnected_players.get(user_id2, (None, None))[1]
+            conn1 = active_players.get(user_id1, {}).get("conn") or disconnected_players.get(user_id1, (None, None))[1]
+            conn2 = active_players.get(user_id2, {}).get("conn") or disconnected_players.get(user_id2, (None, None))[1]
         elif user_id == user_id2:
-            conn2 = conn
-            conn1 = active_players.get(user_id1) or disconnected_players.get(user_id1, (None, None))[1]
+            conn2 = active_players.get(user_id2, {}).get("conn") or disconnected_players.get(user_id2, (None, None))[1]
+            conn1 = active_players.get(user_id1, {}).get("conn") or disconnected_players.get(user_id1, (None, None))[1]
         else:
             raise ValueError(f"Invalid user_id: {user_id}.")
 
@@ -410,6 +391,11 @@ def main():
                 print(f"[INFO] Player 1 connected from {addr1} with ID {user_id1}")
                 conn2, addr2, user_id2 = player_queue.get()
                 print(f"[INFO] Player 2 connected from {addr2} with ID {user_id2}")
+                
+                token1 = secrets.token_hex(8)
+                token2 = secrets.token_hex(8)
+                active_players[user_id1] = {"conn": conn1, "token": token1}
+                active_players[user_id2] = {"conn": conn2, "token": token2}
 
                 # Notify spectators that the game is starting
                 notify_spectators(f"Game is starting! Player 1 (ID {user_id1}) and Player 2 (ID {user_id2}) are ready to play.\n")
@@ -420,10 +406,15 @@ def main():
                 try:
                     # Ask players if they want to play again
                     while True:
+                        token1 = secrets.token_hex(8)
+                        token2 = secrets.token_hex(8)
+                        active_players[user_id1] = {"conn": conn1, "token": token1}
+                        active_players[user_id2] = {"conn": conn2, "token": token2}
+                        
                         run_multi_player_game_online(
                         conn1, conn2, notify_spectators, user_id1, user_id2, s,
                         handle_lobby_connections, send_packet, receive_packet,
-                        disconnected_players, active_players)
+                        disconnected_players, active_players, token1=token1, token2=token2)
                         try:
                             send_packet(conn2, user_id2, 6, "Waiting for Player 1 to respond...")
                             def get_valid_response(conn, user_id):
