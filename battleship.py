@@ -349,7 +349,7 @@ def load_game_state(filename):
         return None
 
 
-def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, wait_for_reconnection, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None):
+def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, handle_lobby_connections, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None):
     sequence_number1 = 0
     sequence_number2 = 0
     waiting_for_reconnection = {1: False, 2: False}
@@ -360,6 +360,8 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                 send_packet(conn, sequence_number, 1, msg)
             except Exception as e:
                 print(f"[ERROR] Failed to send to player: {e}")
+        else:
+            print("[ERROR] Connection object is None. Cannot send message.")
 
     def send_to_both(msg):
         send_to_player(conn1, sequence_number1, msg)
@@ -521,11 +523,12 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                         "user_id2": user_id2,
                     }
                     disconnected_players[user_id1] = (game_state, conn1)
+                    print(disconnected_players)
                     conn1.close()
                     save_game_state("game_state.pkl", game_state)
 
                     try:
-                        conn1 = wait_for_reconnection(server_socket, user_id1)
+                        conn1 = handle_lobby_connections(server_socket)
                         if conn1:
                             # Update the active players dictionary and reset timeout
                             active_players[user_id1] = conn1
@@ -533,16 +536,16 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             send_packet(conn1, sequence_number1, 1, "You have reconnected. Continuing the game...")
                             send_to_both(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
                             notify_spectators(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
-                        else:
+                        elif conn1 is None:
                             # Handle reconnection failure
-                            send_to_both(f"Game over, Player 1 ({user_id1}) did not reconnect.")
+                            send_to_player(conn2, sequence_number2, f"Game over, Player 1 ({user_id1}) did not reconnect.")
                             notify_spectators(f"Game over, Player 1 ({user_id1}) did not reconnect.")
                             active_players.pop(user_id1, None)
                             game_running = False
                             break
                     except Exception as e:
                         print(f"[ERROR] An error occurred during Player 1's reconnection: {e}")
-                        send_to_both(f"Game over, Player 1 ({user_id1}) did not reconnect.")
+                        send_to_player(conn2, sequence_number2, f"Game over, Player 1 ({user_id1}) did not reconnect.")
                         notify_spectators(f"Game over, Player 1 ({user_id1}) did not reconnect.")
                         active_players.pop(user_id1, None)
                         game_running = False
@@ -652,7 +655,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     save_game_state("game_state.pkl", game_state)
 
                     try:
-                        conn2 = wait_for_reconnection(server_socket, user_id2)
+                        conn2 = handle_lobby_connections(server_socket)
                         if conn2:
                             # Update the active players dictionary and reset timeout
                             active_players[user_id2] = conn2
@@ -660,16 +663,16 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             send_packet(conn2, sequence_number2, 1, "You have reconnected. Continuing the game...")
                             send_to_both(f"Player 2 ({user_id2}) has reconnected. Continuing the game...")
                             notify_spectators(f"Player 2 ({user_id2}) has reconnected. Continuing the game...")
-                        else:
+                        elif conn2 is None:
                             # Handle reconnection failure
-                            send_to_both(f"Game over, Player 2 ({user_id2}) did not reconnect.")
+                            send_to_player(conn1, sequence_number1, f"Game over, Player 2 ({user_id2}) did not reconnect.")
                             notify_spectators(f"Game over, Player 2 ({user_id2}) did not reconnect.")
                             active_players.pop(user_id2, None)
                             game_running = False
                             break
                     except Exception as e:
                         print(f"[ERROR] An error occurred during Player 2's reconnection: {e}")
-                        send_to_both(f"Game over, Player 2 ({user_id2}) did not reconnect.")
+                        send_to_player(conn1, sequence_number1, f"Game over, Player 2 ({user_id2}) did not reconnect.")
                         notify_spectators(f"Game over, Player 2 ({user_id2}) did not reconnect.")
                         active_players.pop(user_id2, None)
                         game_running = False
@@ -680,5 +683,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
     finally:
         send_to_both("The game has ended. Thank you for playing!")
         notify_spectators("The game has ended. Thank you for watching!")
+        conn1.close()
+        conn2.close()
         active_players.pop(user_id1, None)
         active_players.pop(user_id2, None)
