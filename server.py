@@ -418,13 +418,12 @@ def main():
 
                 # Start the multiplayer game
                 try:
-                    run_multi_player_game_online(
+                    # Ask players if they want to play again
+                    while True:
+                        run_multi_player_game_online(
                         conn1, conn2, notify_spectators, user_id1, user_id2, s,
                         handle_lobby_connections, send_packet, receive_packet,
                         disconnected_players, active_players)
-
-                    # Ask players if they want to play again
-                    while True:
                         try:
                             send_packet(conn2, user_id2, 6, "Waiting for Player 1 to respond...")
                             def get_valid_response(conn, user_id):
