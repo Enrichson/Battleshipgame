@@ -8,7 +8,7 @@ from queue import Queue
 from battleship import run_multi_player_game_online
 
 HOST = '127.0.0.1'
-PORT = 5003
+PORT = 5005
 game_running = False
 spectators = []
 player_queue = Queue()
@@ -25,37 +25,51 @@ PACKET_TYPE_SPECTATOR = 4
 PACKET_TYPE_BOARD = 5
 PACKET_TYPE_PROMPT = 6
 
+SHARED_KEY = 13  # Shared key (shift value) for Caesar Cipher
 
 def create_packet(sequence_number, packet_type, payload):
     """
-    Create a packet with a custom header and checksum.
+    Create a packet with a custom header, checksum, and encrypted payload.
     """
-    payload_bytes = payload.encode('utf-8')
+    encrypted_payload = caesar_encrypt(payload, SHARED_KEY)
+    payload_bytes = encrypted_payload.encode('utf-8')
     payload_length = len(payload_bytes)
     header = struct.pack('!H B I', sequence_number, packet_type, payload_length)
     checksum = zlib.crc32(header + payload_bytes)
     packet = header + struct.pack('!I', checksum) + payload_bytes
-    #print(f"[DEBUG] Created Packet: Sequence={sequence_number}, Type={packet_type}, Length={payload_length}, Checksum={checksum}")
     return packet
 
 
 def parse_packet(packet):
     """
-    Parse a packet and verify its checksum.
+    Parse a packet, verify its checksum, and decrypt the payload.
     """
     try:
+        # Extract the header, checksum, and encrypted payload
         header = packet[:7]  # First 7 bytes: Sequence Number (2), Packet Type (1), Payload Length (4)
         checksum = struct.unpack('!I', packet[7:11])[0]
-        payload = packet[11:]
+        encrypted_payload = packet[11:]
 
-        # Recompute checksum
-        computed_checksum = zlib.crc32(header + payload)
+        # Recompute the checksum
+        computed_checksum = zlib.crc32(header + encrypted_payload)
         if checksum != computed_checksum:
             raise ValueError("[ERROR]: Checksum mismatch, packet discarded.")
 
+        # Extract sequence number, packet type, and payload length from the header
         sequence_number, packet_type, payload_length = struct.unpack('!H B I', header)
-        #print(f"[DEBUG] Parsed Packet: Sequence={sequence_number}, Type={packet_type}, Length={payload_length}, Checksum={checksum}")
-        return sequence_number, packet_type, payload.decode('utf-8')
+
+        # Decrypt the payload using Caesar Cipher
+        encrypted_payload = encrypted_payload.decode('utf-8')
+        payload = caesar_decrypt(encrypted_payload, SHARED_KEY)
+
+        # Log the encrypted and decrypted text
+        #print("============================================")
+        #print(f"[DEBUG] Caesar Cipher:")
+        #print(f"       ENCRYPTED TEXT: {encrypted_payload}")
+        #print(f"       DECRYPTED TEXT: {payload}")
+        #print("============================================")
+       
+        return sequence_number, packet_type, payload
     except Exception as e:
         print(f"[ERROR] Failed to parse packet: {e}")
         return None
@@ -336,13 +350,37 @@ def simulate_packet_transmission_with_errors(error_rate):
         if parse_packet(packet) is None:
             corrupted_count += 1
 
+    print("=======================================================================")
     print(f"\n[INFO] Statistical Summary: Simulated packet transmission completed.")
     print(f"Total Packets Sent During Gameplay: {packet_count}")
     print(f"Corrupted Packets Detected: {corrupted_count}")
     print(f"Error Rate: {error_rate * 100:.2f}%")
+    print("=======================================================================")
     if packet_count > 0:
         print(f"Detection Rate: {(corrupted_count / packet_count) * 100:.2f}%")
     return corrupted_count
+
+def caesar_encrypt(text, shift):
+    """
+    Encrypt the text using Caesar Cipher with the given shift.
+    """
+    encrypted = []
+    for char in text:
+        if char.isalpha():
+            shift_base = ord('A') if char.isupper() else ord('a')
+            encrypted.append(chr((ord(char) - shift_base + shift) % 26 + shift_base))
+        else:
+            encrypted.append(char)  # Non-alphabetic characters are not encrypted
+
+    encrypted_text = ''.join(encrypted)
+
+    return encrypted_text
+
+def caesar_decrypt(text, shift):
+    """
+    Decrypt the text using Caesar Cipher with the given shift.
+    """
+    return caesar_encrypt(text, -shift)
 
 def main():
     global game_running, unique_id_counter, player_queue, spectators
@@ -483,8 +521,9 @@ def main():
                     except Exception as e:
                         print(f"[ERROR] Error while closing Player 2 connection: {e}")
 
-                    error_rate = 0.5
-                    simulate_packet_transmission_with_errors(error_rate)
+                    # Simulate packet transmission with errors (Uncomment this for testing)
+                    #error_rate = 0.5
+                    #simulate_packet_transmission_with_errors(error_rate)
 
         except KeyboardInterrupt:
             print("[INFO] Server shutting down due to KeyboardInterrupt.")

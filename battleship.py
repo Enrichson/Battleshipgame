@@ -352,7 +352,6 @@ def load_game_state(filename):
 def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, handle_lobby_connections, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None):
     sequence_number1 = 0
     sequence_number2 = 0
-    waiting_for_reconnection = {1: False, 2: False}
 
     def send_to_player(conn, sequence_number, msg):
         if conn is not None:
