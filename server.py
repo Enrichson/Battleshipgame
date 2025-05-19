@@ -172,7 +172,7 @@ def send_packet(conn, sequence_number, packet_type, payload):
     global packet_count
     packet = create_packet(sequence_number, packet_type, payload)
     conn.sendall(packet)
-    packet_count += 1  # Increment the packet count for statistics
+    packet_count += 1 
 
 
 def receive_packet(conn):
