@@ -433,7 +433,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
         active_players[user_id2] = {"conn": conn2, "token": token2}
 
     game_running = True
-    TIMEOUT_DURATION = 10  
+    TIMEOUT_DURATION = 30  
 
     try:
         while game_running:

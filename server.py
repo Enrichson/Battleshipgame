@@ -664,7 +664,7 @@ def main():
                                 while True:
                                     try:
                                         send_packet(conn, user_id, 6, "Do you want to play again? (y/n):")
-                                        conn.settimeout(10)
+                                        conn.settimeout(30)
                                         response = receive_packet(conn)
                                         if response is None:
                                             print(f"[INFO] Player {user_id} did not respond to replay prompt. Closing connection.")
