@@ -44,7 +44,7 @@ from queue import Queue
 from battleship import run_multi_player_game_online
 
 HOST = '127.0.0.1'
-PORT = 5005
+PORT = 5000
 game_running = False
 spectators = []
 player_queue = Queue()

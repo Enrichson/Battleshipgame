@@ -30,7 +30,7 @@ import threading
 from server import send_packet, receive_packet
 
 HOST = '127.0.0.1'
-PORT = 5005
+PORT = 5000
 Running = True
 Waiting_for_input = False
 
