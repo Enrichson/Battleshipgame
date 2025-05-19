@@ -1,4 +1,4 @@
-# Battleship Game - Multiplayer with Spectator and Reconnection Support
+# BEER Game - Multiplayer with Spectator and Reconnection Support
 
 This project implements a networked multiplayer Battleship game with support for spectators and player reconnection. The game consists of a **server** that manages the game logic and client connections, and a **client** that allows players and spectators to interact with the game.
 
