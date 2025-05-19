@@ -682,8 +682,5 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
             current_turn = 3 - current_turn  # Switch turns
     finally:
         send_to_both("The game has ended. Thank you for playing!")
-        notify_spectators("The game has ended. Thank you for watching!")
-        conn1.close()
-        conn2.close()
         active_players.pop(user_id1, None)
         active_players.pop(user_id2, None)
