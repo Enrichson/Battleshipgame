@@ -62,7 +62,7 @@ This file provides instructions on how to set up and interact with the Battleshi
 
 ### **3. Error handling/termination of terminal**
 - Should you run into any errors, kill the terminal either via the VSCode interface or using CTRL + C to reset and retry again.
-- If you are running on MacOS, since the port number 5000 is by default used by another process (Airdrop). You will need to change the port number initialised on client.py and server.py to a different port value.
+- If you are running on MacOS, since the port number 5000 is by default used by another process (Airdrop). You will need to change the port number initialised on **client.py** and **server.py** to a different port value.
 
 ---
 
