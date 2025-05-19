@@ -8,7 +8,7 @@ from queue import Queue
 from battleship import run_multi_player_game_online
 
 HOST = '127.0.0.1'
-PORT = 5005
+PORT = 5000
 game_running = False
 spectators = []
 player_queue = Queue()
@@ -83,26 +83,37 @@ def send_packet(conn, sequence_number, packet_type, payload):
 def receive_packet(conn):
     try:
         # Read the header first (7 bytes for header + 4 bytes for checksum)
-        header_and_checksum = conn.recv(11)
-        if not header_and_checksum or len(header_and_checksum) < 11:
-            return None
-
+        header_and_checksum = b''
+        while len(header_and_checksum) < 11:
+            try:
+                chunk = conn.recv(11 - len(header_and_checksum))
+                if not chunk:
+                    return None
+                header_and_checksum += chunk
+            except socket.timeout:
+                print("[INFO] Timeout occurred while waiting for data (header).")
+                return None
+            
         # Extract payload length from the header
         _, _, payload_length = struct.unpack('!H B I', header_and_checksum[:7])
 
         # Read the payload (allow empty payload)
         payload = b''
         while len(payload) < payload_length:
-            chunk = conn.recv(payload_length - len(payload))
-            if not chunk:
-                break
-            payload += chunk
+            try:
+                chunk = conn.recv(payload_length - len(payload))
+                if not chunk:
+                    break
+                payload += chunk
+            except socket.timeout:
+                print("[INFO] Timeout occurred while waiting for data (payload).")
+                return None
 
         # Combine header, checksum, and payload
         packet = header_and_checksum + payload
         return parse_packet(packet)
     except socket.timeout:
-        print("[INFO] Timeout occurred while waiting for data.")
+        print("[INFO] Timeout occurred while waiting for data (outer).")
         return None
     except Exception as e:
         print(f"[ERROR] Failed to receive packet: {e}")
@@ -114,8 +125,7 @@ def notify_and_disconnect_lobby():
     """
     for conn, addr in spectators:
         try:
-            send_packet(conn, 0, 1,
-                        "Server is shutting down. Disconnecting...")
+            send_packet(conn, 0, 1, "Server is shutting down. Disconnecting...")
             conn.close()
             print(f"[INFO] Disconnected client {addr} from the lobby.")
         except Exception as e:
@@ -132,17 +142,13 @@ def ask_spectators_to_play():
     with spectators_lock:
         for conn, addr in spectators:
             try:
-                send_packet(conn, 0, 6,
-                            "Do you want to play the next game? (y/n):")
+                send_packet(conn, 0, 6,"Do you want to play the next game? (y/n):")
                 response = receive_packet(conn)
                 if response and response[2].strip().lower() == 'y':
                     willing_spectators.append((conn, addr))
             except Exception as e:
-                print(
-                    f"[ERROR] Failed to communicate with spectator {addr}: {e}"
-                )
-                spectators.remove(
-                    (conn, addr))  # Remove disconnected spectators
+                print(f"[ERROR] Failed to communicate with spectator {addr}: {e}")
+                spectators.remove((conn, addr))  # Remove disconnected spectators
     return willing_spectators
 
 
@@ -190,19 +196,13 @@ def handle_lobby_connections(server_socket):
         elif user_input.lower() == "spectator" or user_input.lower() == "s":
             with spectators_lock:
                 spectators.append((conn, addr))
-            send_packet(
-                conn, 0, 3,
-                "You are now spectating. You will receive updates about ongoing games."
-            )
+            send_packet(conn, 0, 3,"You are now spectating. You will receive updates about ongoing games.")
             print(f"[INFO] Client {addr} is now spectating.")
             notify_spectators("A new spectator has joined.")
 
         # Handle invalid input
         else:
-            send_packet(
-                conn, 0, 3,
-                "Invalid input. Please type 'new', your user ID, or 'spectator'."
-            )
+            send_packet(conn, 0, 3,"Invalid input. Please type 'new', your user ID, or 'spectator'.")
             conn.close()
 
 
@@ -407,18 +407,12 @@ def main():
 
                 # Assign Player 1 and Player 2
                 conn1, addr1, user_id1 = player_queue.get()
-                print(
-                    f"[INFO] Player 1 connected from {addr1} with ID {user_id1}"
-                )
+                print(f"[INFO] Player 1 connected from {addr1} with ID {user_id1}")
                 conn2, addr2, user_id2 = player_queue.get()
-                print(
-                    f"[INFO] Player 2 connected from {addr2} with ID {user_id2}"
-                )
+                print(f"[INFO] Player 2 connected from {addr2} with ID {user_id2}")
 
                 # Notify spectators that the game is starting
-                notify_spectators(
-                    f"Game is starting! Player 1 (ID {user_id1}) and Player 2 (ID {user_id2}) are ready to play.\n"
-                )
+                notify_spectators(f"Game is starting! Player 1 (ID {user_id1}) and Player 2 (ID {user_id2}) are ready to play.\n")
 
                 game_running = True  # Set the game running flag to True
 
@@ -432,70 +426,44 @@ def main():
                     # Ask players if they want to play again
                     while True:
                         try:
-                            send_packet(conn1, user_id1, 6, "Do you want to play again? (y/n):")
-                            send_packet(conn2, user_id2, 6, "Do you want to play again? (y/n):")
+                            send_packet(conn2, user_id2, 6, "Waiting for Player 1 to respond...")
+                            def get_valid_response(conn, user_id):
+                                valid_yes = ["y", "yes"]
+                                valid_no = ["n", "no"]
+                                while True:
+                                    try:
+                                        send_packet(conn, user_id, 6, "Do you want to play again? (y/n):")
+                                        conn.settimeout(10)
+                                        response = receive_packet(conn)
+                                        if response is None:
+                                            print(f"[INFO] Player {user_id} did not respond to replay prompt. Closing connection.")
+                                            try:
+                                                conn.close()
+                                            except Exception as e:
+                                                print(f"[ERROR] Error while closing Player {user_id} connection: {e}")
+                                            return "no"
+                                        answer = response[2].strip().lower()
+                                        if answer in valid_yes + valid_no:
+                                            return answer
+                                        else:
+                                            send_packet(conn, user_id, 6, "Invalid input. Please enter 'y', 'yes', 'n', or 'no'.")
+                                    except socket.timeout:
+                                        print(f"[INFO] Player {user_id} did not respond to replay prompt in time.")
+                                        try:
+                                            conn.close()
+                                        except Exception as e:
+                                            print(f"[ERROR] Error while closing Player {user_id} connection: {e}")
+                                        return "no"
+                                    finally:
+                                        conn.settimeout(None)
 
-                            response1 = receive_packet(conn1)
-                            response2 = receive_packet(conn2)
+                            resp1 = get_valid_response(conn1, user_id1)
+                            resp2 = get_valid_response(conn2, user_id2)
 
-                            valid_yes = ["y", "yes"]
-                            valid_no = ["n", "no"]
-
-                            def sanitize(resp, conn, user_id):
-                                if not resp or resp[2].strip().lower() not in valid_yes + valid_no:
-                                    send_packet(conn, user_id, 6, "Invalid input. Please enter 'y', 'yes', 'n', or 'no'.")
-                                    return None
-                                return resp[2].strip().lower()
-
-                            resp1 = sanitize(response1, conn1, user_id1)
-                            resp2 = sanitize(response2, conn2, user_id2)
-
-                            if resp1 is None or resp2 is None:
-                                continue  # Reprompt both users
-
-                            if resp1 in valid_yes and resp2 in valid_yes:
-                                print("[INFO] Both players want to play again. Restarting game...")
-                                run_multi_player_game_online(
-                                    conn1, conn2, notify_spectators, user_id1, user_id2, s,
-                                    handle_lobby_connections, send_packet, receive_packet,
-                                    disconnected_players, active_players)
-                                continue  # Ask again after this game ends
-
-                            # If here, at least one player said no: close both connections
-                            try:
-                                conn1.close()
-                                print(f"[INFO] Player 1 (ID {user_id1}) connection closed.")
-                            except Exception as e:
-                                print(f"[ERROR] Error while closing Player 1 connection: {e}")
-
-                            try:
-                                conn2.close()
-                                print(f"[INFO] Player 2 (ID {user_id2}) connection closed.")
-                            except Exception as e:
-                                print(f"[ERROR] Error while closing Player 2 connection: {e}")
-
-                            # Try to promote spectators if available
-                            willing_spectators = ask_spectators_to_play()
-                            if len(willing_spectators) >= 2:
-                                print("[INFO] Promoting willing spectators to players for the next game.")
-                                conn1, addr1 = willing_spectators[0]
-                                conn2, addr2 = willing_spectators[1]
-                                user_id1 = unique_id_counter
-                                unique_id_counter += 1
-                                user_id2 = unique_id_counter
-                                unique_id_counter += 1
-                                with spectators_lock:
-                                    spectators.remove((conn1, addr1))
-                                    spectators.remove((conn2, addr2))
-                                run_multi_player_game_online(
-                                    conn1, conn2, notify_spectators, user_id1,
-                                    user_id2, s, handle_lobby_connections,
-                                    send_packet, receive_packet,
-                                    disconnected_players, active_players)
-                                continue
-                            else:
-                                print("[INFO] Not enough willing spectators to start the next game. Waiting for new players.")
-                                break
+                            if resp1 not in ["y", "yes"] or resp2 not in ["y", "yes"]:
+                                send_packet(conn1, user_id1, 3, "Game over. A player has chosen not to play again.")
+                                send_packet(conn2, user_id2, 3, "Game over. A player has chosen not to play again.")
+                                break  # End rematch loop
 
                         except (BrokenPipeError, ConnectionResetError):
                             print("[ERROR] One of the players disconnected during the rematch prompt.")
@@ -524,6 +492,26 @@ def main():
                     # Simulate packet transmission with errors (Uncomment this for testing)
                     #error_rate = 0.5
                     #simulate_packet_transmission_with_errors(error_rate)
+                    
+                    # After the replay prompt loop ends, ask spectators if they want to play
+                    willing_spectators = ask_spectators_to_play()
+                    if len(willing_spectators) >= 2:
+                        print("[INFO] Promoting willing spectators to players for the next game.")
+                        # Remove from spectators and add to player queue
+                        with spectators_lock:
+                            for conn, addr in willing_spectators[:2]:
+                                spectators.remove((conn, addr))
+                        user_id_a = unique_id_counter
+                        unique_id_counter += 1
+                        user_id_b = unique_id_counter
+                        unique_id_counter += 1
+                        player_queue.put((willing_spectators[0][0], willing_spectators[0][1], user_id_a))
+                        player_queue.put((willing_spectators[1][0], willing_spectators[1][1], user_id_b))
+                    else:
+                        print("[INFO] Not enough willing spectators to start the next game. Waiting for new players.")
+
+                    # Now notify remaining spectators that the game is over
+                    notify_spectators("The game has ended. Thank you for watching!")
 
         except KeyboardInterrupt:
             print("[INFO] Server shutting down due to KeyboardInterrupt.")
