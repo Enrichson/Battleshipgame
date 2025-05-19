@@ -71,7 +71,8 @@ def receive_messages(sock):
                     "Do you want to play again?",
                     "Welcome! Are you a new player, reconnecting, or a spectator? (Type 'new', your user ID, or 'spectator'):",
                     "Do you want to play the next game? (y/n):",
-                    "Please enter your user ID to reconnect:"
+                    "Please enter your user ID to reconnect:",
+                    "Please enter your session token to reconnect:"
             ]):
                 Waiting_for_input = True
 
