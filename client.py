@@ -1,9 +1,36 @@
+"""
+client.py - Command-line client for multiplayer game with spectator and reconnection support.
+
+This script connects to a game server via TCP, listens for messages, and interacts with the user
+based on prompts received from the server. It handles both player and spectator modes, and allows
+reconnection by entering a user ID.
+
+Core Features:
+- Connects to the server using a socket on HOST:PORT.
+- Starts a background thread to continuously receive and process packets from the server.
+- Detects prompts for input and enables user interaction in real time.
+- Sends user responses back to the server using a Caesar-encrypted custom packet format.
+- Handles graceful shutdown via KeyboardInterrupt or quit command.
+
+Global Flags:
+- `Running` (bool): Controls the main loop of the client.
+- `Waiting_for_input` (bool): Indicates when the server is expecting user input.
+
+Modules Required:
+- socket
+- threading
+- server (must define send_packet and receive_packet functions)
+
+Author: 23509629 (Enrichson Paris) & 23067779 (Jun Hao Dennis Lou)
+Date: 19 MAY 2025
+"""
+
 import socket
 import threading
 from server import send_packet, receive_packet
 
 HOST = '127.0.0.1'
-PORT = 5000
+PORT = 5005
 Running = True
 Waiting_for_input = False
 
@@ -11,6 +38,20 @@ Waiting_for_input = False
 def receive_messages(sock):
     """
     Continuously receive messages from the server and print them.
+
+    This function runs in a separate thread and listens for incoming packets from the server. It processes
+    the packets and prints the server's messages to the console. If the server prompts for user input, 
+    the `Waiting_for_input` flag is set to True.
+
+    Args:
+        sock (socket.socket): The socket object used to communicate with the server.
+
+    Raises:
+        Exception: If an error occurs while receiving messages from the server.
+
+    Side Effects:
+        - Prints server messages to the console.
+        - Updates the `Waiting_for_input` and `Running` global variables.
     """
     global Waiting_for_input, Running
     while Running:
@@ -24,7 +65,6 @@ def receive_messages(sock):
             sequence_number, packet_type, message = packet
             print(message.strip())
 
-            # If the server prompts for input, set the flag
             if any(prompt in message for prompt in [
                     "Enter starting coordinate", "Enter orientation",
                     "Enter coordinate to fire at",
@@ -42,14 +82,28 @@ def receive_messages(sock):
 
 
 def main():
+    """
+    Entry point for the client application.
+
+    This function establishes a connection to the server, starts a thread to receive messages, and handles
+    user input during gameplay. The client communicates with the server using the `send_packet` and 
+    `receive_packet` functions.
+
+    Raises:
+        KeyboardInterrupt: If the user presses Ctrl+C to exit the application.
+
+    Side Effects:
+        - Connects to the server.
+        - Starts a thread to receive messages from the server.
+        - Processes user input and sends it to the server.
+        - Cleans up resources upon exit.
+    """
     global Running, Waiting_for_input
 
-    # Connect to the server
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((HOST, PORT))
         print("[INFO] Connected to the server.")
 
-        # Start a thread to receive messages from the server
         threading.Thread(target=receive_messages, args=(sock, ),
                          daemon=True).start()
 
@@ -57,13 +111,11 @@ def main():
             sequence_number = 0
             while Running:
                 if Waiting_for_input:
-                    # Get user input and send it to the server
                     user_input = input(">> ").strip()
                     send_packet(sock, sequence_number, 6, user_input)
                     sequence_number += 1
                     Waiting_for_input = False
 
-                    # If the user enters "quit", stop the client
                     if user_input.lower() == "quit":
                         print("[INFO] Quitting the game...")
                         Running = False
@@ -71,7 +123,6 @@ def main():
                         break
 
         except KeyboardInterrupt:
-            # Handle Ctrl+C gracefully
             print("\n[INFO] KeyboardInterrupt detected. Exiting...")
             Running = False
             Waiting_for_input = False
