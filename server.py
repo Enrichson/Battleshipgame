@@ -8,7 +8,7 @@ from queue import Queue
 from battleship import run_multi_player_game_online
 
 HOST = '127.0.0.1'
-PORT = 5002
+PORT = 5003
 game_running = False
 spectators = []
 player_queue = Queue()
@@ -136,77 +136,61 @@ def handle_lobby_connections(server_socket):
     global unique_id_counter, disconnected_players, spectators
 
     while True:
-        try:
-            conn, addr = server_socket.accept()
-            print(f"[INFO] New client connected from {addr}.")
-            send_packet(
-                conn, 0, 1,
-                "Welcome! Are you a new player, reconnecting, or a spectator? (Type 'new', your user ID, or 'spectator'):"
-            )
-
-            try:
-                packet = receive_packet(conn)
-                if not packet:
-                    print("[ERROR] Failed to receive user input.")
-                    conn.close()
-                    continue
-
-                _, _, user_input = packet
-
-                if user_input.lower() == "new" or user_input.lower() == "n":
-                    # Assign a new user ID
-                    user_id = unique_id_counter
-                    unique_id_counter += 1
-                    player_queue.put((conn, addr, user_id))
-                    send_packet(
-                        conn, user_id, 3,
-                        f"Welcome, Player {user_id}! You are in the queue. Waiting for another player..."
-                    )
-                    print(
-                        f"[INFO] New player assigned ID {user_id} and added to the queue."
-                    )
-
-                elif user_input.isdigit() and int(
-                        user_input) in disconnected_players:
-                    # Handle reconnection
-                    user_id = int(user_input)
-                    game_state, _ = disconnected_players.pop(user_id)
-                    send_packet(
-                        conn, user_id, 3,
-                        f"Welcome back, Player {user_id}! Reconnecting you to your game..."
-                    )
-                    print(f"[INFO] Player {user_id} reconnected.")
-                    # Resume the game
-                    threading.Thread(target=resume_game,
-                                    args=(conn, user_id, server_socket,
-                                        notify_spectators, send_packet,
-                                        receive_packet, disconnected_players),
-                                    daemon=True).start()
-
-                elif user_input.lower() == "spectator" or user_input.lower(
-                ) == "s":
-                    # Add the client to the spectators list
-                    with spectators_lock:
-                        spectators.append((conn, addr))
-                    send_packet(
-                        conn, 0, 3,
-                        "You are now spectating. You will receive updates about ongoing games."
-                    )
-                    print(f"[INFO] Client {addr} is now spectating.")
-                    notify_spectators("A new spectator has joined.")
-
-                else:
-                    send_packet(
-                        conn, 0, 3,
-                        "Invalid input. Please type 'new', your user ID, or 'spectator'."
-                    )
-                    conn.close()
-
-            except Exception as e:
-                print(f"[ERROR] Error handling connection from {addr}: {e}")
-                conn.close()
-        except socket.timeout:
+        conn, addr = server_socket.accept()
+        print(f"[INFO] New client connected from {addr}.")
+        send_packet(conn, 0, 1, "Welcome! Are you a new player, reconnecting, or a spectator? (Type 'new', your user ID, or 'spectator'):");
+        
+        packet = receive_packet(conn)
+        if not packet:
+            print("[ERROR] Failed to receive user input.")
+            conn.close()
             continue
+
+        _, _, user_input = packet
+
+        # Handle reconnecting player with 30-second timeout
+        if user_input.isdigit() and int(user_input) in disconnected_players:
+            user_id = int(user_input)
+            print(f"[INFO] Player {user_id} attempting to reconnect...")
+
+            # Mark as active and resume the game in a new thread
+            active_players[user_id] = conn
+            threading.Thread(
+                target=resume_game,
+                args=(conn, user_id, server_socket, notify_spectators, send_packet, receive_packet, disconnected_players),
+                daemon=True
+            ).start()
+            
+        # Handle new player
+        elif user_input.lower() == "new" or user_input.lower() == "n":
+            user_id = unique_id_counter
+            unique_id_counter += 1
+            player_queue.put((conn, addr, user_id))
+            send_packet(
+                conn, user_id, 3,
+                f"Welcome, Player {user_id}! You are in the queue. Waiting for another player..."
+            )
+            print(f"[INFO] New player assigned ID {user_id} and added to the queue.")
+
+        # Handle spectator
+        elif user_input.lower() == "spectator" or user_input.lower() == "s":
+            with spectators_lock:
+                spectators.append((conn, addr))
+            send_packet(
+                conn, 0, 3,
+                "You are now spectating. You will receive updates about ongoing games."
+            )
+            print(f"[INFO] Client {addr} is now spectating.")
+            notify_spectators("A new spectator has joined.")
+
+        # Handle invalid input
+        else:
+            send_packet(
+                conn, 0, 3,
+                "Invalid input. Please type 'new', your user ID, or 'spectator'."
+            )
+            conn.close()
+
 
 def notify_spectators(message, board1=None, board2=None):
     """
@@ -227,6 +211,7 @@ def notify_spectators(message, board1=None, board2=None):
                     (conn, addr))  # Remove disconnected spectators
 
 
+'''
 def wait_for_reconnection(server_socket, player_id, timeout=10):
     """
     Wait for a disconnected player to reconnect within the given timeout.
@@ -247,13 +232,13 @@ def wait_for_reconnection(server_socket, player_id, timeout=10):
         _, _, user_input = packet
         if user_input.isdigit() and int(user_input) == player_id:
             print(f"[INFO] Player {player_id} successfully reconnected from {addr}")
+            active_players[player_id] = conn  # Update active_players
             return conn
         else:
             send_packet(conn, 0, 3, "Invalid user ID for reconnection. Disconnecting.")
-            print(f"[ERROR] Invalid user ID {user_input} for reconnection attempt from {addr}")
             conn.close()
             return None
-    except server_socket.timeout:
+    except socket.timeout:
         print(f"[INFO] Player {player_id} did not reconnect within the timeout.")
         return None
     except Exception as e:
@@ -261,81 +246,41 @@ def wait_for_reconnection(server_socket, player_id, timeout=10):
         return None
     finally:
         server_socket.settimeout(original_timeout)
-        
+'''
+    
     
 
 def resume_game(conn, user_id, server_socket, notify_spectators, send_packet,
                 receive_packet, disconnected_players):
     try:
-        # Load the saved game state from the file
         game_state = load_game_state("game_state.pkl")
         if not game_state:
             raise ValueError("Failed to load game state from file.")
 
-        # Retrieve the second player's connection
         user_id1 = game_state["user_id1"]
         user_id2 = game_state["user_id2"]
-        
-        if user_id == user_id1:
-            # Player 1 is reconnecting
-            conn1 = conn
-            if user_id2 in disconnected_players:
-                conn2 = disconnected_players[user_id2][1]
-                print(
-                    f"[INFO] Retrieved Player 2's connection from disconnected_players."
-                )
-            elif user_id2 in active_players:
-                conn2 = active_players[user_id2]
-                print(f"[INFO] Player 2 is still actively connected.")
-            else:
-                conn2 = None
-        elif user_id == user_id2:
-            # Player 2 is reconnecting
-            conn2 = conn
-            if user_id1 in disconnected_players:
-                conn1 = disconnected_players[user_id1][1]
-                print(
-                    f"[INFO] Retrieved Player 1's connection from disconnected_players."
-                )
-            elif user_id1 in active_players:
-                conn1 = active_players[user_id1]
-                print(f"[INFO] Player 1 is still actively connected.")
-            else:
-                conn1 = None
-        else:
-            raise ValueError(
-                f"Invalid user_id: {user_id}. It does not match Player 1 or Player 2."
-            )
 
-        # Validate connections
+        if user_id == user_id1:
+            conn1 = conn
+            conn2 = active_players.get(user_id2) or disconnected_players.get(user_id2, (None, None))[1]
+        elif user_id == user_id2:
+            conn2 = conn
+            conn1 = active_players.get(user_id1) or disconnected_players.get(user_id1, (None, None))[1]
+        else:
+            raise ValueError(f"Invalid user_id: {user_id}.")
+
         if conn1 is None or conn2 is None:
-            send_packet(
-                conn, user_id, 3,
-                "The other player has disconnected. The game cannot be resumed."
-            )
-            print(
-                f"[ERROR] Cannot resume game: One of the players is disconnected."
-            )
+            send_packet(conn, user_id, 3, "The other player has disconnected. The game cannot be resumed.")
+            print(f"[ERROR] Cannot resume game: One of the players is disconnected.")
             return
 
-        # Resume the game loop
-        run_multi_player_game_online(conn1,
-                                     conn2,
-                                     notify_spectators,
-                                     user_id1,
-                                     user_id2,
-                                     server_socket,
-                                     wait_for_reconnection,
-                                     send_packet,
-                                     receive_packet,
-                                     disconnected_players,
-                                     active_players,
-                                     resuming_game=True,
-                                     saved_game_state=game_state)
+        run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2,
+                                     server_socket, handle_lobby_connections, send_packet,
+                                     receive_packet, disconnected_players, active_players,
+                                     resuming_game=True, saved_game_state=game_state)
     except Exception as e:
         print(f"[ERROR] Failed to resume game for Player {user_id}: {e}")
-        send_packet(conn, user_id, 3,
-                    "Failed to resume your game. Please try again later.")
+        send_packet(conn, user_id, 3, "Failed to resume your game. Please try again later.")
         conn.close()
 
 
@@ -443,7 +388,7 @@ def main():
                 try:
                     run_multi_player_game_online(
                         conn1, conn2, notify_spectators, user_id1, user_id2, s,
-                        wait_for_reconnection, send_packet, receive_packet,
+                        handle_lobby_connections, send_packet, receive_packet,
                         disconnected_players, active_players)
 
                     # Ask players if they want to play again
@@ -474,7 +419,7 @@ def main():
                                 print("[INFO] Both players want to play again. Restarting game...")
                                 run_multi_player_game_online(
                                     conn1, conn2, notify_spectators, user_id1, user_id2, s,
-                                    wait_for_reconnection, send_packet, receive_packet,
+                                    handle_lobby_connections, send_packet, receive_packet,
                                     disconnected_players, active_players)
                                 continue  # Ask again after this game ends
 
@@ -506,7 +451,7 @@ def main():
                                     spectators.remove((conn2, addr2))
                                 run_multi_player_game_online(
                                     conn1, conn2, notify_spectators, user_id1,
-                                    user_id2, s, wait_for_reconnection,
+                                    user_id2, s, handle_lobby_connections,
                                     send_packet, receive_packet,
                                     disconnected_players, active_players)
                                 continue
