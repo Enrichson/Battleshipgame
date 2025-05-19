@@ -1,4 +1,42 @@
-import random
+"""
+battleship.py -- Game logic flow for networked multiplayer Battleship
+
+This module implements the core game logic for a networked multiplayer Battleship game.
+It includes the game board management, ship placement, firing logic, and client-server interaction.
+It handles the game state, including ship placements and firing results, and manages the game loop for two players.
+
+Key Features:
+- Board management: Handles ship placement, firing logic, and game state.
+- Client-server interaction: Manages connections, packet sending/receiving, and reconnections.
+- Game state management: Saves and loads game state using pickle for persistence.
+    
+Class: 
+    Board: Represents the game board, including ship placement and firing logic.
+    Methods:
+        can_place_ship(): Validates if a ship can be placed at a given location.
+        do_place_ship(): Places a ship on the board and returns occupied positions.
+        fire_at(): Processes a firing action and returns the result.
+        all_ships_sunk(): Checks if all ships are sunk.
+        print_display_grid(): Prints the current state of the board.
+        get_display_grid(): Returns a string representation of the display grid.
+        place_ships_manually_with_clientandserver(): Handles manual ship placement via client-server interaction.
+
+Functions:
+    parse_coordinate(): Converts a coordinate string (e.g., 'A1') to zero-based row and column indices.
+    readline_timeout(): Reads a line from a socket with a timeout using select.
+    save_game_state(): Saves the game state to a file using pickle.
+    load_game_state(): Loads the game state from a file using pickle.
+    run_multi_player_game_online(): Manages the multiplayer game loop, including turns, timeouts, and reconnections.    
+
+Dependencies:
+    select, pickle
+
+Usage:
+    Imported by server entry point to launch the game loop and manage connections.
+
+Author: 23509629 (Enrichson Paris) & 23067779 (Jun Hao Dennis Lou)
+Date: 19 MAY 2025
+"""
 import select
 import pickle
 
@@ -8,135 +46,11 @@ SHIPS = [("Carrier", 5), ("Battleship", 4), ("Cruiser", 3), ("Submarine", 3),
 
 
 class Board:
-    """
-    Represents a single Battleship board with hidden ships.
-    We store:
-      - self.hidden_grid: tracks real positions of ships ('S'), hits ('X'), misses ('o')
-      - self.display_grid: the version we show to the player ('.' for unknown, 'X' for hits, 'o' for misses)
-      - self.placed_ships: a list of dicts, each dict with:
-          {
-             'name': <ship_name>,
-             'positions': set of (r, c),
-          }
-        used to determine when a specific ship has been fully sunk.
-
-    In a full 2-player networked game:
-      - Each player has their own Board instance.
-      - When a player fires at their opponent, the server calls
-        opponent_board.fire_at(...) and sends back the result.
-    """
-
     def __init__(self, size=BOARD_SIZE):
         self.size = size
-        # '.' for empty water
         self.hidden_grid = [['.' for _ in range(size)] for _ in range(size)]
-        # display_grid is what the player or an observer sees (no 'S')
         self.display_grid = [['.' for _ in range(size)] for _ in range(size)]
-        self.placed_ships = [
-        ]  # e.g. [{'name': 'Destroyer', 'positions': {(r, c), ...}}, ...]
-
-    def place_ships_randomly(self, ships=SHIPS):
-        """
-        Randomly place each ship in 'ships' on the hidden_grid, storing positions for each ship.
-        In a networked version, you might parse explicit placements from a player's commands
-        (e.g. "PLACE A1 H BATTLESHIP") or prompt the user for board coordinates and placement orientations; 
-        the self.place_ships_manually() can be used as a guide.
-        """
-        for ship_name, ship_size in ships:
-            placed = False
-            while not placed:
-                orientation = random.randint(
-                    0, 1)  # 0 => horizontal, 1 => vertical
-                row = random.randint(0, self.size - 1)
-                col = random.randint(0, self.size - 1)
-
-                if self.can_place_ship(row, col, ship_size, orientation):
-                    occupied_positions = self.do_place_ship(
-                        row, col, ship_size, orientation)
-                    self.placed_ships.append({
-                        'name': ship_name,
-                        'positions': occupied_positions
-                    })
-                    placed = True
-
-    def place_ships_manually_with_clientandserver(self, ships=SHIPS, conn=None, sequence_number=0,
-                                                  send_packet=None, receive_packet=None):
-        """
-        Prompt the client for each ship's starting coordinate and orientation (H or V).
-        Validates the placement; if invalid, re-prompts.
-        """
-        if conn is None or send_packet is None or receive_packet is None:
-            raise ValueError("Connection and packet functions must be provided for client interaction.")
-
-        # Inform the client that ship placement is starting
-        send_packet(conn, sequence_number, 1, "\nPlease place your ships manually on the board.")
-        sequence_number += 1
-        send_packet(conn, sequence_number, 1, "YOUR BOARD:\n" + self.get_display_grid())
-        sequence_number += 1
-
-        for ship_name, ship_size in ships:
-            while True:
-                send_packet(conn, sequence_number, 1, f"\nPlacing your {ship_name} (size {ship_size}).")
-                sequence_number += 1
-                send_packet(conn, sequence_number, 1, "Enter starting coordinate (e.g. A1):")
-                sequence_number += 1
-
-                packet = receive_packet(conn)
-                if not packet:
-                    return False  # Client disconnected or error occurred
-                _, _, coord_str = packet
-
-                if coord_str.lower() == 'quit':
-                    send_packet(conn, sequence_number, 1, "Game Over: You have quit the game.")
-                    return False
-                
-                if not coord_str or not coord_str.strip():
-                    send_packet(conn, sequence_number, 1, "[1] Invalid input. Please enter a coordinate.")
-                    sequence_number += 1
-                    continue
-
-                try:
-                    row, col = parse_coordinate(coord_str)
-                    # Validate orientation
-                    send_packet(conn, sequence_number, 1, "Enter orientation ('H' for horizontal, 'V' for vertical):")
-                    sequence_number += 1
-
-                    packet = receive_packet(conn)
-                    if not packet:
-                        return False  # Client disconnected or error occurred
-                    _, _, orientation_str = packet
-
-                    orientation_str = orientation_str.strip().upper()
-                    if orientation_str not in ('H', 'V'):
-                        send_packet(conn, sequence_number, 1, "[!] Invalid orientation. Please enter 'H' for horizontal or 'V' for vertical.")
-                        sequence_number += 1
-                        continue 
-                    
-                    if not orientation_str or not orientation_str.strip():
-                        send_packet(conn, sequence_number, 1, "[!] Invalid input. Please enter 'H' or 'V'.")
-                        sequence_number += 1
-                        continue
-
-                    orientation = 0 if orientation_str == 'H' else 1
-                    if self.can_place_ship(row, col, ship_size, orientation):
-                        occupied_positions = self.do_place_ship(row, col, ship_size, orientation)
-                        self.placed_ships.append({'name': ship_name, 'positions': occupied_positions})
-                        send_packet(conn, sequence_number, 1, f"{ship_name} placed successfully!")
-                        sequence_number += 1
-                        send_packet(conn, sequence_number, 1, "UPDATED BOARD:\n" + self.get_display_grid())
-                        sequence_number += 1
-                        break
-                    else:
-                        send_packet(conn, sequence_number, 1, f"[!] Cannot place {ship_name} at {coord_str}. Try again.")
-                        sequence_number += 1
-                except ValueError as e:
-                    send_packet(conn, sequence_number, 1, f"[!] Invalid input: {e}")
-                    sequence_number += 1
-
-        # Send the final board to the client
-        send_packet(conn, sequence_number, 1, "YOUR FINAL BOARD:\n" + self.get_display_grid())
-        sequence_number += 1
-        return True
+        self.placed_ships = []  
 
     def can_place_ship(self, row, col, ship_size, orientation):
         """
@@ -163,15 +77,15 @@ class Board:
         Place the ship on hidden_grid and display_grid by marking 'S', and return the set of occupied positions.
         """
         occupied = set()
-        if orientation == 0:  # Horizontal
+        if orientation == 0:  
             for c in range(col, col + ship_size):
                 self.hidden_grid[row][c] = 'S'
-                self.display_grid[row][c] = 'S'  # Update display grid
+                self.display_grid[row][c] = 'S'  
                 occupied.add((row, c))
-        else:  # Vertical
+        else: 
             for r in range(row, row + ship_size):
                 self.hidden_grid[r][col] = 'S'
-                self.display_grid[r][col] = 'S'  # Update display grid
+                self.display_grid[r][col] = 'S' 
                 occupied.add((r, col))
         return occupied
 
@@ -189,17 +103,14 @@ class Board:
         try:
             cell = self.hidden_grid[row][col]
             if cell == 'S':
-                # Mark a hit
                 self.hidden_grid[row][col] = 'X'
                 self.display_grid[row][col] = 'X'
-                # Check if that hit sank a ship
                 sunk_ship_name = self._mark_hit_and_check_sunk(row, col)
                 if sunk_ship_name:
-                    return ('hit', sunk_ship_name)  # A ship has just been sunk
+                    return ('hit', sunk_ship_name) 
                 else:
                     return ('hit', None)
             elif cell == '.':
-                # Mark a miss
                 self.hidden_grid[row][col] = 'o'
                 self.display_grid[row][col] = 'o'
                 return ('miss', None)
@@ -248,12 +159,9 @@ class Board:
         - 'o' for misses,
         - '.' for empty water.
         """
-        # Decide which grid to print
         grid_to_print = self.hidden_grid if show_hidden_board else self.display_grid
 
-        # Column headers (1 .. N)
         print("  " + "".join(str(i + 1).rjust(2) for i in range(self.size)))
-        # Each row labeled with A, B, C, ...
         for r in range(self.size):
             row_label = chr(ord('A') + r)
             row_str = " ".join(grid_to_print[r][c] for c in range(self.size))
@@ -272,6 +180,81 @@ class Board:
             grid_str += f"{row_label:2} {row_str}\n"
         return grid_str
 
+    def place_ships_manually_with_clientandserver(self, ships=SHIPS, conn=None, sequence_number=0,
+                                                  send_packet=None, receive_packet=None):
+        """
+        Prompt the client for each ship's starting coordinate and orientation (H or V).
+        Validates the placement; if invalid, re-prompts.
+        """
+        if conn is None or send_packet is None or receive_packet is None:
+            raise ValueError("Connection and packet functions must be provided for client interaction.")
+
+        send_packet(conn, sequence_number, 1, "\nPlease place your ships manually on the board.")
+        sequence_number += 1
+        send_packet(conn, sequence_number, 1, "YOUR BOARD:\n" + self.get_display_grid())
+        sequence_number += 1
+
+        for ship_name, ship_size in ships:
+            while True:
+                send_packet(conn, sequence_number, 1, f"\nPlacing your {ship_name} (size {ship_size}).")
+                sequence_number += 1
+                send_packet(conn, sequence_number, 1, "Enter starting coordinate (e.g. A1):")
+                sequence_number += 1
+
+                packet = receive_packet(conn)
+                if not packet:
+                    return False
+                _, _, coord_str = packet
+
+                if coord_str.lower() == 'quit':
+                    send_packet(conn, sequence_number, 1, "Game Over: You have quit the game.")
+                    return False
+                
+                if not coord_str or not coord_str.strip():
+                    send_packet(conn, sequence_number, 1, "[1] Invalid input. Please enter a coordinate.")
+                    sequence_number += 1
+                    continue
+
+                try:
+                    row, col = parse_coordinate(coord_str)
+                    send_packet(conn, sequence_number, 1, "Enter orientation ('H' for horizontal, 'V' for vertical):")
+                    sequence_number += 1
+
+                    packet = receive_packet(conn)
+                    if not packet:
+                        return False 
+                    _, _, orientation_str = packet
+
+                    orientation_str = orientation_str.strip().upper()
+                    if orientation_str not in ('H', 'V'):
+                        send_packet(conn, sequence_number, 1, "[!] Invalid orientation. Please enter 'H' for horizontal or 'V' for vertical.")
+                        sequence_number += 1
+                        continue 
+                    
+                    if not orientation_str or not orientation_str.strip():
+                        send_packet(conn, sequence_number, 1, "[!] Invalid input. Please enter 'H' or 'V'.")
+                        sequence_number += 1
+                        continue
+
+                    orientation = 0 if orientation_str == 'H' else 1
+                    if self.can_place_ship(row, col, ship_size, orientation):
+                        occupied_positions = self.do_place_ship(row, col, ship_size, orientation)
+                        self.placed_ships.append({'name': ship_name, 'positions': occupied_positions})
+                        send_packet(conn, sequence_number, 1, f"{ship_name} placed successfully!")
+                        sequence_number += 1
+                        send_packet(conn, sequence_number, 1, "UPDATED BOARD:\n" + self.get_display_grid())
+                        sequence_number += 1
+                        break
+                    else:
+                        send_packet(conn, sequence_number, 1, f"[!] Cannot place {ship_name} at {coord_str}. Try again.")
+                        sequence_number += 1
+                except ValueError as e:
+                    send_packet(conn, sequence_number, 1, f"[!] Invalid input: {e}")
+                    sequence_number += 1
+
+        send_packet(conn, sequence_number, 1, "YOUR FINAL BOARD:\n" + self.get_display_grid())
+        sequence_number += 1
+        return True
 
 def parse_coordinate(coord_str):
     """
@@ -304,7 +287,6 @@ def parse_coordinate(coord_str):
     except Exception as e:
         raise ValueError(f"Failed to parse coordinate '{coord_str}': {e}")
 
-
 def readline_timeout(conn, timeout):
     """
     Read a line from a socket connection `conn` within `timeout` seconds using select.
@@ -317,7 +299,6 @@ def readline_timeout(conn, timeout):
     ready, _, _ = select.select([fd], [], [], timeout)
     if not ready:
         return None
-    # Read until newline or EOF
     line = b""
     while True:
         chunk = conn.recv(1)
@@ -349,7 +330,41 @@ def load_game_state(filename):
         return None
 
 
-def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, handle_lobby_connections, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None, token1=None, token2=None):
+def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, handle_lobby_connections, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None):
+    """
+    Runs a turn-based multiplayer game session between two connected clients.
+
+    This function handles the full game loop, including:
+    - Initial ship placement for both players (or restoration from saved state)
+    - Alternating turns with timeout handling
+    - Broadcasting updates to spectators
+    - Managing in-game disconnections and reconnections
+    - Detecting win conditions and ending the game gracefully
+
+    If `resuming_game` is True and a valid `saved_game_state` is provided, the game resumes
+    from where it left off using the loaded board states and turn tracking.
+
+    Args:
+        conn1 (socket.socket): Socket connection for Player 1.
+        conn2 (socket.socket): Socket connection for Player 2.
+        notify_spectators (function): Function to broadcast messages to all spectators.
+        user_id1 (int): Unique user ID for Player 1.
+        user_id2 (int): Unique user ID for Player 2.
+        server_socket (socket.socket): Main server socket used for accepting reconnects.
+        handle_lobby_connections (function): Function to handle new or reconnecting players.
+        send_packet (function): Function to send an encrypted, structured message to a client.
+        receive_packet (function): Function to receive a structured message from a client.
+        disconnected_players (dict): Maps user IDs to their saved game state and connection object.
+        active_players (dict): Tracks currently connected players by user ID.
+        resuming_game (bool, optional): Whether to resume from a previously saved state.
+        saved_game_state (dict, optional): Serialized game data for resumption, including boards, turn info, and timeouts.
+
+    Side Effects:
+        - Manages global connection dictionaries.
+        - Sends data over player and spectator sockets.
+        - Modifies and persists game state via file (`game_state.pkl`).
+        - Logs gameplay, disconnections, and errors to console.
+    """
     sequence_number1 = 0
     sequence_number2 = 0
 
@@ -367,7 +382,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
         send_to_player(conn2, sequence_number2, msg)
 
     if resuming_game and saved_game_state:
-        # Load the saved game state
         board1 = saved_game_state["board1"]
         board2 = saved_game_state["board2"]
         freshBoard1 = saved_game_state["freshBoard1"]
@@ -376,7 +390,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
         timeout_counts = saved_game_state["timeout_counts"]
         print("[INFO] Resuming game from saved state...")
     else:
-        # Initialize a new game
         board1 = Board(BOARD_SIZE)
         board2 = Board(BOARD_SIZE)
 
@@ -396,16 +409,15 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
         freshBoard1 = Board(BOARD_SIZE)
         freshBoard2 = Board(BOARD_SIZE)
 
-        current_turn = 1  # Player 1 starts
-        timeout_counts = {1: 0, 2: 0}  # Timeout counts for both players
+        current_turn = 1 
+        timeout_counts = {1: 0, 2: 0} 
 
-        # Save the initial game state
         game_state = {
             "board1": board1,
             "board2": board2,
             "freshBoard1": freshBoard1,
             "freshBoard2": freshBoard2,
-            "current_turn": 1,  # Player 1 starts
+            "current_turn": 1, 
             "timeout_counts": {1: 0, 2: 0},
             "user_id1": user_id1,
             "user_id2": user_id2,
@@ -422,7 +434,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
         active_players[user_id2] = {"conn": conn2, "token": token2}
 
     game_running = True
-    TIMEOUT_DURATION = 10  # Timeout duration in seconds
+    TIMEOUT_DURATION = 10  
 
     try:
         while game_running:
@@ -442,30 +454,30 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                         if timeout_counts[1] == 1:
                             send_to_both("Player 1 took too long. Turn skipped.")
                             notify_spectators("Player 1 took too long. Turn skipped.")
-                            current_turn = 2  # Switch to Player 2
-                            continue  # Skip Player 1's turn
+                            current_turn = 2 
+                            continue 
                         elif timeout_counts[1] == 2:
                             send_to_both("Game Over: Player 1 forfeited the game due to inactivity.")
                             notify_spectators("Game Over: Player 1 forfeited the game due to inactivity.")
                             game_running = False
                             break
-                        continue  # If not game over, skip rest of this turn
+                        continue  
 
                     _, _, guess = packet
 
-                    if guess is None:  # Timeout occurred (if your receive_packet returns None on timeout)
+                    if guess is None: 
                         timeout_counts[1] += 1
                         if timeout_counts[1] == 1:
                             send_to_both("Player 1 took too long. Turn skipped.")
                             notify_spectators("Player 1 took too long. Turn skipped.")
-                            current_turn = 2  # Switch to Player 2
-                            continue  # Skip Player 1's turn
+                            current_turn = 2  
+                            continue  
                         elif timeout_counts[1] == 2:
                             send_to_both("Game Over: Player 1 forfeited the game due to inactivity.")
                             notify_spectators("Game Over: Player 1 forfeited the game due to inactivity.")
                             game_running = False
                             break
-                        continue  # If not game over, skip rest of this turn
+                        continue  
 
                     if not guess or not guess.strip():
                         send_to_player(conn1, sequence_number1, "Invalid input. Please enter a coordinate.")
@@ -473,7 +485,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     elif guess.lower() == 'quit':
                         raise ConnectionResetError("Player 1 has quit the game.")
 
-                    timeout_counts[1] = 0  # Reset timeout flag for Player 1
+                    timeout_counts[1] = 0 
 
                     try:
                         row, col = parse_coordinate(guess)
@@ -494,19 +506,17 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             send_to_player(conn1, sequence_number1, "You've already fired at that location.")
                             continue
 
-                        # Send Player 1 their own firing board after each move
+                      
                         send_to_player(conn1, sequence_number1, "YOUR FIRING BOARD:\n" + freshBoard2.get_display_grid())
-                        # Send spectators a copy of the board
                         notify_spectators("PLAYER 1 FIRING BOARD:\n" + board2.get_display_grid())
 
-                        # Check if Player 2's ships are all sunk
+                      
                         if board2.all_ships_sunk():
                             send_to_both("Player 1 wins! All Player 2's ships are sunk.")
                             notify_spectators("Player 1 wins! All Player 2's ships are sunk.")
                             game_running = False
                             break
                     except ValueError as e:
-                        # handle Invalid coordinate parsing
                         send_to_player(conn1, sequence_number1, f"Invalid coordinate: {e}")
                         sequence_number1 += 1
                         continue
@@ -539,7 +549,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             send_to_both(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
                             notify_spectators(f"Player 1 ({user_id1}) has reconnected. Continuing the game...")
                         elif conn1 is None:
-                            # Handle reconnection failure
                             send_to_player(conn2, sequence_number2, f"Game over, Player 1 ({user_id1}) did not reconnect.")
                             notify_spectators(f"Game over, Player 1 ({user_id1}) did not reconnect.")
                             active_players.pop(user_id1, None)
@@ -570,30 +579,30 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                         if timeout_counts[2] == 1:
                             send_to_both("Player 2 took too long. Turn skipped.")
                             notify_spectators("Player 2 took too long. Turn skipped.")
-                            current_turn = 1  # Switch to Player 1
-                            continue  # Skip Player 1's turn
+                            current_turn = 1 
+                            continue  
                         elif timeout_counts[2] == 2:
                             send_to_both("Game Over: Player 2 forfeited the game due to inactivity.")
                             notify_spectators("Game Over: Player 2 forfeited the game due to inactivity.")
                             game_running = False
                             break
-                        continue  # If not game over, skip rest of this turn
+                        continue  
 
                     _, _, guess = packet
 
-                    if guess is None:  # Timeout occurred (if your receive_packet returns None on timeout)
+                    if guess is None: 
                         timeout_counts[1] += 1
                         if timeout_counts[1] == 1:
                             send_to_both("Player 1 took too long. Turn skipped.")
                             notify_spectators("Player 1 took too long. Turn skipped.")
-                            current_turn = 2  # Switch to Player 2
-                            continue  # Skip Player 1's turn
+                            current_turn = 2 
+                            continue  
                         elif timeout_counts[1] == 2:
                             send_to_both("Game Over: Player 1 forfeited the game due to inactivity.")
                             notify_spectators("Game Over: Player 1 forfeited the game due to inactivity.")
                             game_running = False
                             break
-                        continue  # If not game over, skip rest of this turn
+                        continue  
 
                     if not guess or not guess.strip():
                         send_to_player(conn2, sequence_number2, "Invalid input. Please enter a coordinate.")
@@ -601,7 +610,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     elif guess.lower() == 'quit':
                         raise ConnectionResetError("Player 2 has quit the game.")
 
-                    timeout_counts[2] = 0  # Reset timeout flag for Player 2
+                    timeout_counts[2] = 0  
                     
                     try:
                         row, col = parse_coordinate(guess)
@@ -622,12 +631,10 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             send_to_player(conn2, sequence_number2, "You've already fired at that location.")
                             continue
 
-                        # Send Player 2 their own firing board after each move
+                      
                         send_to_player(conn2, sequence_number2, "YOUR FIRING BOARD:\n" + freshBoard1.get_display_grid())
-                        # Send spectators a copy of the board
                         notify_spectators("PLAYER 2 FIRING BOARD:\n" + board1.get_display_grid())
 
-                        # Check if Player 1's ships are all sunk
                         if board1.all_ships_sunk():
                             send_to_both("Player 2 wins! All Player 1's ships are sunk.")
                             notify_spectators("Player 2 wins! All Player 1's ships are sunk.")
@@ -635,7 +642,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             break
                         
                     except ValueError as e:
-                        # handle Invalid coordinate parsing
                         send_to_player(conn1, sequence_number1, f"Invalid coordinate: {e}")
                         sequence_number1 += 1
                         continue
@@ -667,7 +673,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             send_to_both(f"Player 2 ({user_id2}) has reconnected. Continuing the game...")
                             notify_spectators(f"Player 2 ({user_id2}) has reconnected. Continuing the game...")
                         elif conn2 is None:
-                            # Handle reconnection failure
                             send_to_player(conn1, sequence_number1, f"Game over, Player 2 ({user_id2}) did not reconnect.")
                             notify_spectators(f"Game over, Player 2 ({user_id2}) did not reconnect.")
                             active_players.pop(user_id2, None)
@@ -682,7 +687,7 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                         break
                     continue
 
-            current_turn = 3 - current_turn  # Switch turns
+            current_turn = 3 - current_turn 
     finally:
         active_players.pop(user_id1, None)
         active_players.pop(user_id2, None)
