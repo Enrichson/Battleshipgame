@@ -266,19 +266,16 @@ def parse_coordinate(coord_str):
         row_letter = coord_str[0]
         col_digits = coord_str[1:]
 
-        # Validate row letter
         if row_letter < 'A' or row_letter > chr(ord('A') + BOARD_SIZE - 1):
             raise ValueError(
                 f"Invalid row letter '{row_letter}'. Must be between A and {chr(ord('A') + BOARD_SIZE - 1)}."
             )
-
-        # Validate column digits
         if not int(col_digits.isdigit()) or len(col_digits) < 1 or len(col_digits) > 2:
             raise ValueError("Invalid format. Must be a letter followed by a number (e.g., A1).")
         
 
         row = ord(row_letter) - ord('A')
-        col = int(col_digits) - 1  # zero-based
+        col = int(col_digits) - 1 
 
         if row < 0 or row >= BOARD_SIZE or col < 0 or col >= BOARD_SIZE:
             raise ValueError("Coordinate out of bounds.")
@@ -330,7 +327,7 @@ def load_game_state(filename):
         return None
 
 
-def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, handle_lobby_connections, send_packet, receive_packet, disconnected_players, active_players, resuming_game=False, saved_game_state=None):
+def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user_id2, server_socket, handle_lobby_connections, send_packet, receive_packet, disconnected_players, active_players,token1 = None, token2 = None, resuming_game=False, saved_game_state=None):
     """
     Runs a turn-based multiplayer game session between two connected clients.
 
@@ -358,6 +355,8 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
         active_players (dict): Tracks currently connected players by user ID.
         resuming_game (bool, optional): Whether to resume from a previously saved state.
         saved_game_state (dict, optional): Serialized game data for resumption, including boards, turn info, and timeouts.
+        token1 = None: Session token for Player 1.
+        token2 = None: Session token for Player 2.
 
     Side Effects:
         - Manages global connection dictionaries.
@@ -506,7 +505,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                             send_to_player(conn1, sequence_number1, "You've already fired at that location.")
                             continue
 
-                      
                         send_to_player(conn1, sequence_number1, "YOUR FIRING BOARD:\n" + freshBoard2.get_display_grid())
                         notify_spectators("PLAYER 1 FIRING BOARD:\n" + board2.get_display_grid())
 
@@ -542,7 +540,6 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     try:
                         conn1 = handle_lobby_connections(server_socket)
                         if conn1:
-                            # Update the active players dictionary and reset timeout
                             active_players[user_id1] = {"conn": conn1, "token": token1}
                             timeout_counts[1] = 0  # Reset timeout counter for Player 1
                             send_packet(conn1, sequence_number1, 1, "You have reconnected. Continuing the game...")
@@ -666,9 +663,8 @@ def run_multi_player_game_online(conn1, conn2, notify_spectators, user_id1, user
                     try:
                         conn2 = handle_lobby_connections(server_socket)
                         if conn2:
-                            # Update the active players dictionary and reset timeout
                             active_players[user_id2] = {"conn": conn2, "token": token2}
-                            timeout_counts[2] = 0  # Reset timeout counter for Player 1
+                            timeout_counts[2] = 0
                             send_packet(conn2, sequence_number2, 1, "You have reconnected. Continuing the game...")
                             send_to_both(f"Player 2 ({user_id2}) has reconnected. Continuing the game...")
                             notify_spectators(f"Player 2 ({user_id2}) has reconnected. Continuing the game...")

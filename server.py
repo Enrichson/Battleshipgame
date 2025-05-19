@@ -1,6 +1,5 @@
 """
 server.py
----------
 
 This module implements the server-side functionality for the Battleship game. It handles client connections, 
 packet creation and parsing, game state management, and spectator notifications.
@@ -131,7 +130,13 @@ def parse_packet(packet):
         encrypted_payload = encrypted_payload.decode('utf-8')
         payload = caesar_decrypt(encrypted_payload, SHARED_KEY)
 
-        # Log the encrypted and decrypted text
+        # Debug message to log header details and checksum (Uncomment this to see the Packet Structure Info)
+        #print(f"[DEBUG] Header Details - Sequence Number: {struct.unpack('!H', header[:2])[0]}, "
+        #      f"Packet Type: {struct.unpack('!B', header[2:3])[0]}, "
+        #      f"Payload Length: {struct.unpack('!I', header[3:7])[0]}")
+        #print(f"[DEBUG] Checksum - Extracted: {checksum}, Recomputed: {computed_checksum}")
+
+        # Log the encrypted and decrypted text (Uncomment this to see the Caesar Cipher Debugging Info)
         #print("============================================")
         #print(f"[DEBUG] Caesar Cipher:")
         #print(f"       ENCRYPTED TEXT: {encrypted_payload}")
@@ -164,8 +169,10 @@ def send_packet(conn, sequence_number, packet_type, payload):
     Raises:
         socket.error: If there is a failure in sending the data over the socket.
     """
+    global packet_count
     packet = create_packet(sequence_number, packet_type, payload)
     conn.sendall(packet)
+    packet_count += 1  # Increment the packet count for statistics
 
 
 def receive_packet(conn):
@@ -311,8 +318,6 @@ def handle_lobby_connections(server_socket):
             user_id = int(user_input)
             print(f"[INFO] Player {user_id} attempting to reconnect...")
 
-
-            # Prompt for session token
             send_packet(conn, 0, 3, "Please enter your session token to reconnect:")
             token_packet = receive_packet(conn)
             if not token_packet:
@@ -321,7 +326,6 @@ def handle_lobby_connections(server_socket):
                 continue
             _, _, session_token = token_packet
 
-            # Validate session token
             expected_token = active_players.get(user_id, {}).get("token")
             if session_token != expected_token:
                 send_packet(conn, 0, 3, "Invalid session token. Reconnection denied.")
@@ -330,7 +334,7 @@ def handle_lobby_connections(server_socket):
                 continue
 
             print(f"[INFO] Player {user_id} provided valid session token and is reconnecting...")
-            # Mark as active and resume the game in a new thread
+         
             active_players[user_id]["conn"] = conn
 
             threading.Thread(
@@ -637,13 +641,11 @@ def main():
                 active_players[user_id1] = {"conn": conn1, "token": token1}
                 active_players[user_id2] = {"conn": conn2, "token": token2}
 
-                # Notify spectators that the game is starting
                 notify_spectators(f"Game is starting! Player 1 (ID {user_id1}) and Player 2 (ID {user_id2}) are ready to play.\n")
 
                 game_running = True  
 
                 try:
-                    # Ask players if they want to play again
                     while True:
                         token1 = secrets.token_hex(8)
                         token2 = secrets.token_hex(8)
